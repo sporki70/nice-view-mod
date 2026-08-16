@@ -7,6 +7,7 @@
 
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
+#include <zephyr/sys/util.h>
 
 #include <zephyr/logging/log.h>
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
@@ -88,9 +89,6 @@ struct layer_status_state {
 
 /* ==========================================================================
  * WPM state
- *
- * WPM wird NICHT dargestellt.
- * WPM steuert nur Bongo Cat.
  * ========================================================================== */
 
 struct wpm_status_state {
@@ -135,8 +133,6 @@ static bool key_released = false;
 static bool keys_active = false;
 
 static uint8_t active_keys = 0;
-
-static uint32_t last_key_event = 0;
 
 static uint32_t last_idle_update = 0;
 
@@ -196,11 +192,6 @@ static uint8_t get_current_modifiers(void) {
 
 static void update_bongo_from_wpm(uint8_t wpm) {
 
-    /*
-     * Über 30 WPM:
-     * Furious.
-     */
-
     if (wpm > 30) {
 
         current_anim_state =
@@ -211,11 +202,6 @@ static void update_bongo_from_wpm(uint8_t wpm) {
         return;
     }
 
-
-    /*
-     * Wir verlassen Furious,
-     * sobald WPM wieder <= 30 ist.
-     */
 
     if (current_anim_state == ANIM_STATE_FRENZIED) {
 
@@ -266,6 +252,7 @@ static const lv_img_dsc_t *get_bongo_frame(void) {
             return last_active_frame;
         }
     }
+
 
     /* ----------------------------------------------------------------------
      * Casual
@@ -319,38 +306,54 @@ static const lv_img_dsc_t *get_bongo_frame(void) {
 
 
 /* ==========================================================================
- * TOP PANEL
+ * Draw complete display
  *
- * Dieses Panel ist physisch oben.
+ * Physisches Layout nach Rotation:
  *
- * Nach Rotation:
+ * ┌──────────────────┐
+ * │ Battery     WiFi │
+ * │                  │
+ * │    BONGO CAT     │
+ * │                  │
+ * │ CTRL SHIFT ALT   │
+ * │                  │
+ * │   Bluetooth  1   │
+ * │                  │
+ * │       L0         │
+ * └──────────────────┘
  *
- * ┌─────────────────────────┐
- * │ Akku              WiFi  │
- * │                         │
- * │        BONGO            │
- * └─────────────────────────┘
+ * Physische Größe:
+ *
+ *       68 x 160
+ *
+ * Das LVGL-Canvas selbst ist logisch:
+ *
+ *       160 x 68
+ *
+ * und wird anschließend mit rotate_canvas()
+ * gedreht.
  *
  * ========================================================================== */
 
-static void draw_top(
-    lv_obj_t *widget,
-    lv_color_t cbuf[],
-    const struct status_state *state
+static void draw_status(
+    struct zmk_widget_status *widget
 ) {
 
     lv_obj_t *canvas =
-        lv_obj_get_child(widget, 0);
+        lv_obj_get_child(widget->obj, 0);
 
 
-    /* Background */
+    /* ----------------------------------------------------------------------
+     * Background
+     * ---------------------------------------------------------------------- */
 
-    lv_draw_rect_dsc_t bg;
+    lv_draw_rect_dsc_t background;
 
     init_rect_dsc(
-        &bg,
+        &background,
         LVGL_BACKGROUND
     );
+
 
     lv_canvas_draw_rect(
         canvas,
@@ -358,29 +361,29 @@ static void draw_top(
         0,
         CANVAS_SIZE,
         CANVAS_SIZE,
-        &bg
+        &background
     );
 
 
-    /* Battery */
+    /* ======================================================================
+     * 1. BATTERY + WIFI
+     *
+     * Physisch ganz oben.
+     * ====================================================================== */
 
     draw_battery(
         canvas,
-        state
+        &widget->state
     );
 
-
-    /* ----------------------------------------------------------------------
-     * Connection icon
-     * ---------------------------------------------------------------------- */
 
 #if !IS_ENABLED(CONFIG_ZMK_SPLIT) || \
     IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
 
-    lv_draw_label_dsc_t label;
+    lv_draw_label_dsc_t connection_label;
 
     init_label_dsc(
-        &label,
+        &connection_label,
         LVGL_FOREGROUND,
         &lv_font_montserrat_16,
         LV_TEXT_ALIGN_RIGHT
@@ -391,7 +394,7 @@ static void draw_top(
 
 
     switch (
-        state->selected_endpoint.transport
+        widget->state.selected_endpoint.transport
     ) {
 
     case ZMK_TRANSPORT_USB:
@@ -406,9 +409,9 @@ static void draw_top(
 
     case ZMK_TRANSPORT_BLE:
 
-        if (state->active_profile_bonded) {
+        if (widget->state.active_profile_bonded) {
 
-            if (state->active_profile_connected) {
+            if (widget->state.active_profile_connected) {
 
                 strcat(
                     output_text,
@@ -440,7 +443,7 @@ static void draw_top(
 
 
     /*
-     * Rechts oben.
+     * WiFi/Bluetooth rechts oben.
      */
 
     lv_canvas_draw_text(
@@ -448,73 +451,18 @@ static void draw_top(
         38,
         0,
         28,
-        &label,
+        &connection_label,
         output_text
     );
 
 #endif
 
 
-    /*
-     * Rotation für das physisch hochkant eingebaute nice!view.
-     */
-
-    rotate_canvas(
-        canvas,
-        cbuf
-    );
-}
-
-
-/* ==========================================================================
- * MIDDLE PANEL
- *
- * Physisch in der Mitte:
- *
- * ┌─────────────────────────┐
- * │                         │
- * │        BONGO CAT        │
- * │                         │
- * │ CTRL ALT CMD SHIFT      │
- * └─────────────────────────┘
- *
- * ========================================================================== */
-
-static void draw_middle(
-    lv_obj_t *widget,
-    lv_color_t cbuf[],
-    const struct status_state *state
-) {
-
-    lv_obj_t *canvas =
-        lv_obj_get_child(widget, 1);
-
-
-    lv_draw_rect_dsc_t bg;
-
-    init_rect_dsc(
-        &bg,
-        LVGL_BACKGROUND
-    );
-
-
-    /*
-     * Komplettes Panel löschen.
-     */
-
-    lv_canvas_draw_rect(
-        canvas,
-        0,
-        0,
-        CANVAS_SIZE,
-        CANVAS_SIZE,
-        &bg
-    );
-
-
-    /* ----------------------------------------------------------------------
-     * Bongo
-     * ---------------------------------------------------------------------- */
+    /* ======================================================================
+     * 2. BONGO CAT
+     *
+     * Der Bongo-Bereich liegt direkt unter Battery/WiFi.
+     * ====================================================================== */
 
     lv_draw_img_dsc_t img;
 
@@ -530,6 +478,7 @@ static void draw_middle(
     int image_width =
         frame->header.w;
 
+
     int image_height =
         frame->header.h;
 
@@ -538,150 +487,88 @@ static void draw_middle(
      * Horizontal zentrieren.
      */
 
-    int x =
+    int bongo_x =
         (CANVAS_SIZE - image_width) / 2;
 
 
     /*
-     * Vertikal zentrieren.
+     * Der Bongo beginnt unter dem oberen Statusbereich.
      *
-     * Wir lassen unten etwas Platz für Modifier.
+     * Das Canvas ist 68px hoch.
+     * Der Bereich wird nach Rotation physisch vertikal.
      */
 
-    int y =
-        3;
+    int bongo_y = 10;
 
-
-    /*
-     * Wenn das Bild größer als 68px ist,
-     * wird es automatisch vom Canvas abgeschnitten.
-     */
 
     ARG_UNUSED(image_height);
 
 
     lv_canvas_draw_img(
         canvas,
-        x,
-        y,
+        bongo_x,
+        bongo_y,
         frame,
         &img
     );
 
 
-    /* ----------------------------------------------------------------------
-     * Modifier
-     * ---------------------------------------------------------------------- */
-
-    /*
-     * Deine vorhandene draw_modifiers()-Funktion bleibt erhalten.
+    /* ======================================================================
+     * 3. MODIFIER
      *
-     * Die Icons sind bereits 16px auseinander und funktionieren so.
-     */
+     * Unterhalb von Bongo.
+     * ====================================================================== */
 
     draw_modifiers(
         canvas,
         2,
-        52
+        48
     );
 
 
-    /*
-     * Rotation.
-     */
-
-    rotate_canvas(
-        canvas,
-        cbuf
-    );
-
-
-    ARG_UNUSED(state);
-}
-
-
-/* ==========================================================================
- * BOTTOM PANEL
- *
- * Physisch unten:
- *
- * ┌─────────────────────────┐
- * │                         │
- * │    Bluetooth    Layer   │
- * │                         │
- * └─────────────────────────┘
- *
- * ========================================================================== */
-
-static void draw_bottom(
-    lv_obj_t *widget,
-    lv_color_t cbuf[],
-    const struct status_state *state
-) {
-
-    lv_obj_t *canvas =
-        lv_obj_get_child(widget, 2);
-
-
-    lv_draw_rect_dsc_t bg;
-
-    init_rect_dsc(
-        &bg,
-        LVGL_BACKGROUND
-    );
-
-
-    lv_canvas_draw_rect(
-        canvas,
-        0,
-        0,
-        CANVAS_SIZE,
-        CANVAS_SIZE,
-        &bg
-    );
-
+    /* ======================================================================
+     * 4. BLUETOOTH PROFILE
+     *
+     * Unterhalb der Modifier.
+     * ====================================================================== */
 
 #if !IS_ENABLED(CONFIG_ZMK_SPLIT) || \
     IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
 
-    /* ----------------------------------------------------------------------
-     * Bluetooth profile
-     * ---------------------------------------------------------------------- */
-
-    lv_draw_arc_dsc_t arc;
+    lv_draw_arc_dsc_t profile_arc;
 
     init_arc_dsc(
-        &arc,
+        &profile_arc,
         LVGL_FOREGROUND,
         2
     );
 
 
-    lv_draw_arc_dsc_t arc_filled;
+    lv_draw_arc_dsc_t profile_arc_filled;
 
     init_arc_dsc(
-        &arc_filled,
+        &profile_arc_filled,
         LVGL_FOREGROUND,
-        7
+        6
     );
 
 
     /*
-     * Profile links.
+     * Bluetooth-Profil.
      */
 
     const int profile_x = 18;
-    const int profile_y = 34;
+    const int profile_y = 62;
 
 
     lv_canvas_draw_arc(
         canvas,
         profile_x,
         profile_y,
-        11,
+        9,
         0,
         360,
-        &arc
+        &profile_arc
     );
 
 
@@ -689,10 +576,10 @@ static void draw_bottom(
         canvas,
         profile_x,
         profile_y,
-        7,
+        5,
         0,
         359,
-        &arc_filled
+        &profile_arc_filled
     );
 
 
@@ -701,7 +588,7 @@ static void draw_bottom(
     init_label_dsc(
         &profile_label,
         LVGL_BACKGROUND,
-        &lv_font_montserrat_16,
+        &lv_font_montserrat_14,
         LV_TEXT_ALIGN_CENTER
     );
 
@@ -714,7 +601,7 @@ static void draw_bottom(
         sizeof(profile_text),
         "%" PRIu8,
         (uint8_t)(
-            state->active_profile_index + 1
+            widget->state.active_profile_index + 1
         )
     );
 
@@ -722,16 +609,23 @@ static void draw_bottom(
     lv_canvas_draw_text(
         canvas,
         profile_x - 5,
-        profile_y - 9,
+        profile_y - 8,
         10,
         &profile_label,
         profile_text
     );
 
+#endif
 
-    /* ----------------------------------------------------------------------
-     * Layer
-     * ---------------------------------------------------------------------- */
+
+    /* ======================================================================
+     * 5. LAYER
+     *
+     * Ganz unten.
+     * ====================================================================== */
+
+#if !IS_ENABLED(CONFIG_ZMK_SPLIT) || \
+    IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
 
     lv_draw_label_dsc_t layer_label;
 
@@ -746,13 +640,13 @@ static void draw_bottom(
     char layer_text[16] = {};
 
 
-    if (state->layer_label != NULL) {
+    if (widget->state.layer_label != NULL) {
 
         snprintf(
             layer_text,
             sizeof(layer_text),
             "%s",
-            state->layer_label
+            widget->state.layer_label
         );
 
     } else {
@@ -761,16 +655,20 @@ static void draw_bottom(
             layer_text,
             sizeof(layer_text),
             "L%" PRIu8,
-            state->layer_index
+            widget->state.layer_index
         );
     }
 
 
+    /*
+     * Layer rechts neben dem Bluetooth-Profil.
+     */
+
     lv_canvas_draw_text(
         canvas,
-        34,
-        28,
-        30,
+        32,
+        57,
+        32,
         &layer_label,
         layer_text
     );
@@ -778,13 +676,15 @@ static void draw_bottom(
 #endif
 
 
-    /*
-     * Rotation.
-     */
+    /* ======================================================================
+     * ROTATION
+     *
+     * Logisch 160x68 -> physisch 68x160
+     * ====================================================================== */
 
     rotate_canvas(
         canvas,
-        cbuf
+        widget->cbuf
     );
 }
 
@@ -809,10 +709,8 @@ static void set_battery_status(
         state.level;
 
 
-    draw_top(
-        widget->obj,
-        widget->cbuf,
-        &widget->state
+    draw_status(
+        widget
     );
 }
 
@@ -915,17 +813,8 @@ static void set_output_status(
 #endif
 
 
-    draw_top(
-        widget->obj,
-        widget->cbuf,
-        &widget->state
-    );
-
-
-    draw_bottom(
-        widget->obj,
-        widget->cbuf3,
-        &widget->state
+    draw_status(
+        widget
     );
 }
 
@@ -1028,10 +917,8 @@ static void set_layer_status(
 #endif
 
 
-    draw_bottom(
-        widget->obj,
-        widget->cbuf3,
-        &widget->state
+    draw_status(
+        widget
     );
 }
 
@@ -1068,7 +955,8 @@ layer_status_get_state(
 
     return (struct layer_status_state) {
 
-        .index = index,
+        .index =
+            index,
 
         .label =
             zmk_keymap_layer_name(index),
@@ -1104,9 +992,6 @@ static void process_keypress_event(
     key_released =
         !pressed;
 
-    last_key_event =
-        k_uptime_get_32();
-
 
     if (pressed) {
 
@@ -1114,7 +999,8 @@ static void process_keypress_event(
             active_keys++;
         }
 
-        keys_active = true;
+        keys_active =
+            true;
 
     } else {
 
@@ -1127,13 +1013,14 @@ static void process_keypress_event(
     }
 
 
-    /*
-     * Modifier sofort aktualisieren.
-     */
+    /* ----------------------------------------------------------------------
+     * Modifier aktualisieren
+     * ---------------------------------------------------------------------- */
 
     if (!modifier_work_scheduled) {
 
-        modifier_work_scheduled = true;
+        modifier_work_scheduled =
+            true;
 
         k_work_schedule(
             &modifier_work,
@@ -1142,9 +1029,9 @@ static void process_keypress_event(
     }
 
 
-    /*
-     * Bongo sofort aktualisieren.
-     */
+    /* ----------------------------------------------------------------------
+     * Bongo sofort aktualisieren
+     * ---------------------------------------------------------------------- */
 
     struct zmk_widget_status *widget;
 
@@ -1155,10 +1042,8 @@ static void process_keypress_event(
         node
     ) {
 
-        draw_middle(
-            widget->obj,
-            widget->cbuf2,
-            &widget->state
+        draw_status(
+            widget
         );
     }
 }
@@ -1206,10 +1091,8 @@ static void modifier_work_handler(
             }
 
 
-            draw_middle(
-                widget->obj,
-                widget->cbuf2,
-                &widget->state
+            draw_status(
+                widget
             );
         }
     }
@@ -1265,7 +1148,8 @@ wpm_status_get_state(
 
     if (pos_ev != NULL) {
 
-        is_key_event = true;
+        is_key_event =
+            true;
 
         pressed =
             pos_ev->state > 0;
@@ -1308,9 +1192,8 @@ static void wpm_status_update_cb(
         } else {
 
             /*
-             * WPM selbst wird NICHT angezeigt.
-             *
-             * Nur Bongo aktualisieren.
+             * WPM wird nicht angezeigt.
+             * Es steuert nur Bongo.
              */
 
             update_bongo_from_wpm(
@@ -1318,10 +1201,8 @@ static void wpm_status_update_cb(
             );
 
 
-            draw_middle(
-                widget->obj,
-                widget->cbuf2,
-                &widget->state
+            draw_status(
+                widget
             );
         }
     }
@@ -1373,9 +1254,9 @@ static void animation_work_handler(
     }
 
 
-    /*
-     * Idle animation.
-     */
+    /* ----------------------------------------------------------------------
+     * Idle animation
+     * ---------------------------------------------------------------------- */
 
     if (
         !keys_active &&
@@ -1439,26 +1320,27 @@ static void animation_work_handler(
             node
         ) {
 
-            draw_middle(
-                widget->obj,
-                widget->cbuf2,
-                &widget->state
+            draw_status(
+                widget
             );
         }
     }
 
 
-    /*
-     * Einmalige Key-Events löschen.
-     */
+    /* ----------------------------------------------------------------------
+     * Einmalige Key-Events löschen
+     * ---------------------------------------------------------------------- */
 
-    key_pressed = false;
-    key_released = false;
+    key_pressed =
+        false;
+
+    key_released =
+        false;
 
 
-    /*
-     * Weiterlaufen.
-     */
+    /* ----------------------------------------------------------------------
+     * Worker weiterlaufen lassen
+     * ---------------------------------------------------------------------- */
 
     k_work_schedule(
         &animation_work,
@@ -1477,25 +1359,28 @@ int zmk_widget_status_init(
 ) {
 
     /*
-     * Das echte nice!view ist 160 x 68 logisch.
+     * ======================================================================
+     * DISPLAY
      *
-     * Da es physisch hochkant eingebaut wird, verwenden wir
-     * drei 68x68 Panels.
+     * Das nice!view arbeitet logisch mit 160 x 68.
      *
-     * Nach Rotation:
+     * Durch rotate_canvas() wird daraus physisch:
      *
-     *     TOP
-     *      ↓
-     *   MIDDLE
-     *      ↓
-     *    BOTTOM
+     *             68 x 160
      *
-     * = komplette 68 x 160 Fläche.
+     * Wir verwenden EIN einziges Canvas.
+     * ======================================================================
      */
 
     widget->obj =
         lv_obj_create(parent);
 
+
+    /*
+     * Logische LVGL-Größe.
+     *
+     * NICHT 68 x 68.
+     */
 
     lv_obj_set_size(
         widget->obj,
@@ -1505,23 +1390,23 @@ int zmk_widget_status_init(
 
 
     /* ----------------------------------------------------------------------
-     * TOP
+     * Canvas
      * ---------------------------------------------------------------------- */
 
-    lv_obj_t *top =
+    lv_obj_t *canvas =
         lv_canvas_create(widget->obj);
 
 
     lv_obj_align(
-        top,
-        LV_ALIGN_TOP_RIGHT,
+        canvas,
+        LV_ALIGN_TOP_LEFT,
         0,
         0
     );
 
 
     lv_canvas_set_buffer(
-        top,
+        canvas,
         widget->cbuf,
         CANVAS_SIZE,
         CANVAS_SIZE,
@@ -1530,68 +1415,7 @@ int zmk_widget_status_init(
 
 
     /* ----------------------------------------------------------------------
-     * MIDDLE
-     * ---------------------------------------------------------------------- */
-
-    lv_obj_t *middle =
-        lv_canvas_create(widget->obj);
-
-
-    /*
-     * Ohne WPM-Graph können wir das mittlere Panel etwas weiter
-     * nach rechts schieben.
-     *
-     * 92..160 = 68px
-     * 24..92 = 68px
-     * -44..24 = 68px
-     *
-     * Damit sind die drei Panels lückenlos.
-     */
-
-    lv_obj_align(
-        middle,
-        LV_ALIGN_TOP_LEFT,
-        24,
-        0
-    );
-
-
-    lv_canvas_set_buffer(
-        middle,
-        widget->cbuf2,
-        CANVAS_SIZE,
-        CANVAS_SIZE,
-        LV_IMG_CF_TRUE_COLOR
-    );
-
-
-    /* ----------------------------------------------------------------------
-     * BOTTOM
-     * ---------------------------------------------------------------------- */
-
-    lv_obj_t *bottom =
-        lv_canvas_create(widget->obj);
-
-
-    lv_obj_align(
-        bottom,
-        LV_ALIGN_TOP_LEFT,
-        -44,
-        0
-    );
-
-
-    lv_canvas_set_buffer(
-        bottom,
-        widget->cbuf3,
-        CANVAS_SIZE,
-        CANVAS_SIZE,
-        LV_IMG_CF_TRUE_COLOR
-    );
-
-
-    /* ----------------------------------------------------------------------
-     * Widget list
+     * Widget registrieren
      * ---------------------------------------------------------------------- */
 
     sys_slist_append(
@@ -1601,7 +1425,7 @@ int zmk_widget_status_init(
 
 
     /* ----------------------------------------------------------------------
-     * Listeners
+     * Listener initialisieren
      * ---------------------------------------------------------------------- */
 
     widget_battery_status_init();
@@ -1614,7 +1438,7 @@ int zmk_widget_status_init(
 
 
     /* ----------------------------------------------------------------------
-     * Modifier initial state
+     * Modifier initialisieren
      * ---------------------------------------------------------------------- */
 
     for (int i = 0; i < NUM_SYMBOLS; i++) {
@@ -1629,7 +1453,7 @@ int zmk_widget_status_init(
 
 
     /* ----------------------------------------------------------------------
-     * Animation initial state
+     * Bongo initialisieren
      * ---------------------------------------------------------------------- */
 
     current_anim_state =
@@ -1646,7 +1470,7 @@ int zmk_widget_status_init(
 
 
     /* ----------------------------------------------------------------------
-     * Work
+     * Work initialisieren
      * ---------------------------------------------------------------------- */
 
     k_work_init_delayable(
@@ -1661,34 +1485,22 @@ int zmk_widget_status_init(
     );
 
 
-    k_work_schedule(
-        &animation_work,
-        K_MSEC(100)
-    );
-
-
     /* ----------------------------------------------------------------------
      * Initial draw
      * ---------------------------------------------------------------------- */
 
-    draw_top(
-        widget->obj,
-        widget->cbuf,
-        &widget->state
+    draw_status(
+        widget
     );
 
 
-    draw_middle(
-        widget->obj,
-        widget->cbuf2,
-        &widget->state
-    );
+    /* ----------------------------------------------------------------------
+     * Animation starten
+     * ---------------------------------------------------------------------- */
 
-
-    draw_bottom(
-        widget->obj,
-        widget->cbuf3,
-        &widget->state
+    k_work_schedule(
+        &animation_work,
+        K_MSEC(100)
     );
 
 
