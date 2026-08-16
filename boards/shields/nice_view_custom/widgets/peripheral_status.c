@@ -119,6 +119,7 @@ int zmk_widget_status_init(struct zmk_widget_status *widget, lv_obj_t *parent) {
     uint32_t random = sys_rand32_get() % 3;  // Get random number between 0-2
     const lv_img_dsc_t* images[] = {&balloon, &jelllyfish, &seahorse};
     lv_img_set_src(art, images[random]);
+    lv_img_set_angle(art, 2700);
     lv_obj_align(art, LV_ALIGN_TOP_LEFT, 0, 0);
 
     sys_slist_append(&widgets, &widget->node);
