@@ -111,21 +111,45 @@ ZMK_SUBSCRIPTION(widget_peripheral_status, zmk_split_peripheral_status_changed);
 int zmk_widget_status_init(struct zmk_widget_status *widget, lv_obj_t *parent) {
     widget->obj = lv_obj_create(parent);
     lv_obj_set_size(widget->obj, 160, 68);
-    lv_obj_t *top = lv_canvas_create(widget->obj);
-    lv_obj_align(top, LV_ALIGN_TOP_RIGHT, 0, 0);
-    lv_canvas_set_buffer(top, widget->cbuf, CANVAS_SIZE, CANVAS_SIZE, LV_IMG_CF_TRUE_COLOR);
 
     lv_obj_t *art = lv_img_create(widget->obj);
-    uint32_t random = sys_rand32_get() % 3;  // Get random number between 0-2
-    const lv_img_dsc_t* images[] = {&balloon, &jelllyfish, &seahorse};
+
+    uint32_t random = sys_rand32_get() % 3;
+    const lv_img_dsc_t *images[] = {&balloon, &jelllyfish, &seahorse};
+
     lv_img_set_src(art, images[random]);
-    lv_obj_align(art, LV_ALIGN_TOP_LEFT, -48, 0);
-    
+    lv_obj_align(art, LV_ALIGN_TOP_LEFT, 68, 0);
+
+    lv_obj_t *top = lv_canvas_create(widget->obj);
+    lv_obj_align(top, LV_ALIGN_TOP_LEFT, 0, 0);
+    lv_canvas_set_buffer(top, widget->cbuf, CANVAS_SIZE, CANVAS_SIZE,
+                          LV_IMG_CF_TRUE_COLOR);
+
     sys_slist_append(&widgets, &widget->node);
     widget_battery_status_init();
     widget_peripheral_status_init();
 
     return 0;
 }
+
+//int zmk_widget_status_init(struct zmk_widget_status *widget, lv_obj_t *parent) {
+//    widget->obj = lv_obj_create(parent);
+//    lv_obj_set_size(widget->obj, 160, 68);
+//    lv_obj_t *top = lv_canvas_create(widget->obj);
+//    lv_obj_align(top, LV_ALIGN_TOP_RIGHT, 0, 0);
+//    lv_canvas_set_buffer(top, widget->cbuf, CANVAS_SIZE, CANVAS_SIZE, LV_IMG_CF_TRUE_COLOR);
+
+//    lv_obj_t *art = lv_img_create(widget->obj);
+//    uint32_t random = sys_rand32_get() % 3;  // Get random number between 0-2
+//    const lv_img_dsc_t* images[] = {&balloon, &jelllyfish, &seahorse};
+//    lv_img_set_src(art, images[random]);
+//    lv_obj_align(art, LV_ALIGN_TOP_LEFT, -48, 0);
+    
+//    sys_slist_append(&widgets, &widget->node);
+//    widget_battery_status_init();
+//    widget_peripheral_status_init();
+
+//    return 0;
+//}
 
 lv_obj_t *zmk_widget_status_obj(struct zmk_widget_status *widget) { return widget->obj; }
