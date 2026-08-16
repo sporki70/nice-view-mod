@@ -26,7 +26,7 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 LV_IMG_DECLARE(balloon);
 LV_IMG_DECLARE(jelllyfish);
 LV_IMG_DECLARE(seahorse);
-LV_IMG_DECLARE(char_pikachu);
+LV_IMG_DECLARE(CHAR_PIKACHU);
 
 static sys_slist_t widgets = SYS_SLIST_STATIC_INIT(&widgets);
 
@@ -126,10 +126,10 @@ int zmk_widget_status_init(struct zmk_widget_status *widget, lv_obj_t *parent) {
         &balloon,
         &jelllyfish,
         &seahorse,
-        &char_pikachu
+        &CHAR_PIKACHU
     };
 
-    lv_img_set_src(art, &char_pikachu);
+    lv_img_set_src(art, &CHAR_PIKACHU);
     
     /*
      * 68px status + 92px artwork = 160px total
