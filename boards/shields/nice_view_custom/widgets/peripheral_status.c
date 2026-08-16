@@ -111,27 +111,31 @@ ZMK_SUBSCRIPTION(widget_peripheral_status, zmk_split_peripheral_status_changed);
 int zmk_widget_status_init(struct zmk_widget_status *widget, lv_obj_t *parent) {
     widget->obj = lv_obj_create(parent);
     lv_obj_set_size(widget->obj, 160, 68);
-    
-    /* Status canvas MUST remain child 0 */
+
+    /* Status */
     lv_obj_t *top = lv_canvas_create(widget->obj);
-    lv_obj_align(top, LV_ALIGN_TOP_RIGHT, 0, 0);
+    lv_obj_align(top, LV_ALIGN_TOP_LEFT, 0, 0);
     lv_canvas_set_buffer(top, widget->cbuf, CANVAS_SIZE, CANVAS_SIZE,
                           LV_IMG_CF_TRUE_COLOR);
-    
+
     /* Artwork */
     lv_obj_t *art = lv_img_create(widget->obj);
     uint32_t random = sys_rand32_get() % 3;
-    const lv_img_dsc_t *images[] = {&balloon, &jelllyfish, &seahorse};
-    
-    lv_img_set_src(art, images[random]);
-    
-    /* Artwork gets the remaining 92 px */
-    lv_obj_align(art, LV_ALIGN_TOP_LEFT, 0, 0);
+    const lv_img_dsc_t *images[] = {
+        &balloon,
+        &jelllyfish,
+        &seahorse
+    };
 
-    /* Status must be drawn above the artwork */
-    lv_obj_move_foreground(top);
+    lv_img_set_src(art, images[random]);
+
+    /*
+     * 68px status + 92px artwork = 160px total
+     */
+    lv_obj_align(art, LV_ALIGN_TOP_LEFT, 68, 0);
 
     sys_slist_append(&widgets, &widget->node);
+
     widget_battery_status_init();
     widget_peripheral_status_init();
 
