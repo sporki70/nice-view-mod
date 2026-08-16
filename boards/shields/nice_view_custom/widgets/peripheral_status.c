@@ -128,8 +128,6 @@ int zmk_widget_status_init(struct zmk_widget_status *widget, lv_obj_t *parent) {
     };
 
     lv_img_set_src(art, images[random]);
-
-    lv_img_set_angle(art, 1800);
     
     /*
      * 68px status + 92px artwork = 160px total
