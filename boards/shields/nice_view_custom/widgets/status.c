@@ -1716,7 +1716,6 @@ lv_obj_t *zmk_widget_status_obj(
 #include <zephyr/sys/util.h>
 
 #include <zephyr/logging/log.h>
-LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
 #include <lvgl.h>
 
