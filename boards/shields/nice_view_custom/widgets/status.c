@@ -194,26 +194,21 @@ static const uint32_t WPM_UPDATE_INTERVAL = 1000;
 static struct k_work_delayable animation_work;
 static struct k_work_delayable modifier_work;
 
-/* --------------------------------------------------------------------------
+/* ==========================================================================
  * TOP
  *
- * Physical display:
+ * Physisches Display: hochkant 68 x 160
  *
- *     AKKU       WIFI
+ *     ┌────────────────┐
+ *     │     AKKU       │
+ *     │       WIFI     │
+ *     └────────────────┘
  *
- * -------------------------------------------------------------------------- */
+ * ========================================================================== */
 
 static void draw_top(lv_obj_t *widget,
                      lv_color_t cbuf[],
                      const struct status_state *state) {
-
-    /*
-     * Canvas 0 = top section.
-     *
-     * The actual parent is 160x68 because the display is physically
-     * mounted portrait. The canvas itself is 68x68 and is rotated
-     * using rotate_canvas().
-     */
 
     lv_obj_t *canvas = lv_obj_get_child(widget, 0);
 
@@ -241,17 +236,12 @@ static void draw_top(lv_obj_t *widget,
 
     /* ------------------------------------------------------------------
      * Battery
-     *
-     * draw_battery() uses the normal battery graphic from util.c.
-     *
-     * x/y are chosen so that after the 270 degree canvas rotation
-     * the battery appears in the upper physical section.
      * ------------------------------------------------------------------ */
 
     draw_battery(canvas, state);
 
     /* ------------------------------------------------------------------
-     * Connection / WiFi
+     * Connection status
      * ------------------------------------------------------------------ */
 
     char output_text[8] = {};
@@ -284,36 +274,40 @@ static void draw_top(lv_obj_t *widget,
     }
 
     /*
-     * Battery occupies the left side of this physical row.
+     * Connection symbol.
      *
-     * Because the canvas is rotated, changing the local Y coordinate
-     * moves the element horizontally on the physical display.
+     * The canvas is rotated afterwards, therefore these coordinates
+     * refer to the logical 68x68 canvas.
      */
 
     lv_canvas_draw_text(
         canvas,
-        2,
-        38,
-        28,
+        40,
+        24,
+        24,
         &label_dsc,
         output_text
     );
 
-    /* Rotate the complete top canvas */
+    /* Rotate canvas for physical portrait display */
 
     rotate_canvas(canvas, cbuf);
 }
 
-/* --------------------------------------------------------------------------
+/* ==========================================================================
  * MIDDLE
  *
- * Physical display:
+ * Physisches Display:
  *
- *             BONGOCAT
+ *     ┌────────────────┐
+ *     │                │
+ *     │    BONGOCAT    │
+ *     │                │
+ *     │ CTRL ALT WIN   │
+ *     │      SHIFT     │
+ *     └────────────────┘
  *
- *             CTRL ALT WIN SHIFT
- *
- * -------------------------------------------------------------------------- */
+ * ========================================================================== */
 
 static void draw_middle(lv_obj_t *widget,
                         lv_color_t cbuf[],
@@ -339,15 +333,7 @@ static void draw_middle(lv_obj_t *widget,
     );
 
     /* ------------------------------------------------------------------
-     * Modifier row
-     *
-     * draw_modifiers() is deliberately kept below the cat.
-     * ------------------------------------------------------------------ */
-
-    draw_modifiers(canvas, 0, 62);
-
-    /* ------------------------------------------------------------------
-     * BongoCat
+     * Determine BongoCat frame
      * ------------------------------------------------------------------ */
 
     const lv_img_dsc_t *current_frame = &bongo_resting;
@@ -371,7 +357,8 @@ static void draw_middle(lv_obj_t *widget,
             current_frame = last_active_frame;
 
         } else if (
-            k_uptime_get_32() - last_key_event <= KEY_DEBOUNCE_INTERVAL
+            k_uptime_get_32() - last_key_event <=
+            KEY_DEBOUNCE_INTERVAL
         ) {
 
             current_frame = last_active_frame;
@@ -425,7 +412,8 @@ static void draw_middle(lv_obj_t *widget,
             current_frame = last_active_frame;
 
         } else if (
-            k_uptime_get_32() - last_key_event <= KEY_DEBOUNCE_INTERVAL
+            k_uptime_get_32() - last_key_event <=
+            KEY_DEBOUNCE_INTERVAL
         ) {
 
             current_frame = last_active_frame;
@@ -457,13 +445,13 @@ static void draw_middle(lv_obj_t *widget,
         }
     }
 
-    /* The release event has now been consumed */
-
-    key_released = false;
-
     /* ------------------------------------------------------------------
      * Draw BongoCat
+     *
+     * The BongoCat occupies the upper part of the logical canvas.
      * ------------------------------------------------------------------ */
+
+    key_released = false;
 
     lv_canvas_draw_img(
         canvas,
@@ -473,21 +461,36 @@ static void draw_middle(lv_obj_t *widget,
         &img_dsc
     );
 
-    /* Rotate middle canvas */
+    /* ------------------------------------------------------------------
+     * Modifier row
+     *
+     * IMPORTANT:
+     * y=50 keeps the modifier icons inside the 68x68 canvas.
+     * ------------------------------------------------------------------ */
+
+    draw_modifiers(
+        canvas,
+        0,
+        50
+    );
+
+    /* Rotate canvas for portrait display */
 
     rotate_canvas(canvas, cbuf);
 }
 
-/* --------------------------------------------------------------------------
+/* ==========================================================================
  * BOTTOM
  *
- * Physical display:
+ * Physisches Display:
  *
- *     Bluetooth Profile
+ *     ┌────────────────┐
+ *     │  1  2  3  4  5 │
+ *     │                │
+ *     │     LAYER 0    │
+ *     └────────────────┘
  *
- *     Layer
- *
- * -------------------------------------------------------------------------- */
+ * ========================================================================== */
 
 static void draw_bottom(lv_obj_t *widget,
                         lv_color_t cbuf[],
@@ -499,10 +502,18 @@ static void draw_bottom(lv_obj_t *widget,
     init_rect_dsc(&rect_black_dsc, LVGL_BACKGROUND);
 
     lv_draw_arc_dsc_t arc_dsc;
-    init_arc_dsc(&arc_dsc, LVGL_FOREGROUND, 2);
+    init_arc_dsc(
+        &arc_dsc,
+        LVGL_FOREGROUND,
+        2
+    );
 
     lv_draw_arc_dsc_t arc_dsc_filled;
-    init_arc_dsc(&arc_dsc_filled, LVGL_FOREGROUND, 7);
+    init_arc_dsc(
+        &arc_dsc_filled,
+        LVGL_FOREGROUND,
+        7
+    );
 
     lv_draw_label_dsc_t label_dsc;
     init_label_dsc(
@@ -532,32 +543,30 @@ static void draw_bottom(lv_obj_t *widget,
     );
 
     /* ------------------------------------------------------------------
-     * Bluetooth profile
+     * Bluetooth profiles
      *
-     * Show all five profiles.
+     * 1   2   3   4   5
      *
-     * Connected  = solid outer ring
-     * Selected   = filled center
-     * Unconnected/bonded = outer ring
-     * Open       = no ring
+     * Only the currently selected profile can be connected/open.
      * ------------------------------------------------------------------ */
 
-    const int profile_y = 13;
+    const int profile_y = 14;
 
     for (int i = 0; i < 5; i++) {
 
-        int profile_x = 6 + (i * 14);
+        const int profile_x =
+            7 + i * 13;
 
         bool selected =
             i == state->active_profile_index;
 
         bool bonded =
+            selected &&
             state->active_profile_bonded;
 
-        bool connected =
-            state->active_profile_connected;
-
         if (bonded) {
+
+            /* Outer circle */
 
             lv_canvas_draw_arc(
                 canvas,
@@ -568,6 +577,8 @@ static void draw_bottom(lv_obj_t *widget,
                 359,
                 &arc_dsc
             );
+
+            /* Filled center for selected profile */
 
             if (selected) {
 
@@ -592,12 +603,8 @@ static void draw_bottom(lv_obj_t *widget,
             i + 1
         );
 
-        /*
-         * Selected profile gets inverted number when filled.
-         */
-
         lv_draw_label_dsc_t *profile_label =
-            selected && bonded
+            (selected && bonded)
                 ? &label_dsc_black
                 : &label_dsc;
 
@@ -609,13 +616,6 @@ static void draw_bottom(lv_obj_t *widget,
             profile_label,
             profile_text
         );
-
-        /*
-         * Silence compiler warnings for the state variables when the
-         * profile is not the currently selected profile.
-         */
-
-        (void)connected;
     }
 
     /* ------------------------------------------------------------------
@@ -636,7 +636,7 @@ static void draw_bottom(lv_obj_t *widget,
         lv_canvas_draw_text(
             canvas,
             0,
-            38,
+            40,
             CANVAS_SIZE,
             &label_dsc,
             layer_text
@@ -647,14 +647,14 @@ static void draw_bottom(lv_obj_t *widget,
         lv_canvas_draw_text(
             canvas,
             0,
-            38,
+            40,
             CANVAS_SIZE,
             &label_dsc,
             state->layer_label
         );
     }
 
-    /* Rotate bottom canvas */
+    /* Rotate canvas for portrait display */
 
     rotate_canvas(canvas, cbuf);
 }
@@ -669,10 +669,12 @@ static void set_battery_status(
 ) {
 
 #if IS_ENABLED(CONFIG_USB_DEVICE_STACK)
-    widget->state.charging = state.usb_present;
+    widget->state.charging =
+        state.usb_present;
 #endif
 
-    widget->state.battery = state.level;
+    widget->state.battery =
+        state.level;
 
     draw_top(
         widget->obj,
@@ -692,7 +694,10 @@ static void battery_status_update_cb(
         widget,
         node
     ) {
-        set_battery_status(widget, state);
+        set_battery_status(
+            widget,
+            state
+        );
     }
 }
 
@@ -704,13 +709,15 @@ static struct battery_status_state battery_status_get_state(
         as_zmk_battery_state_changed(eh);
 
     return (struct battery_status_state) {
+
         .level =
             (ev != NULL)
                 ? ev->state_of_charge
                 : zmk_battery_state_of_charge(),
 
 #if IS_ENABLED(CONFIG_USB_DEVICE_STACK)
-        .usb_present = zmk_usb_is_powered(),
+        .usb_present =
+            zmk_usb_is_powered(),
 #endif
     };
 }
@@ -781,7 +788,11 @@ static void output_status_update_cb(
         widget,
         node
     ) {
-        set_output_status(widget, &state);
+
+        set_output_status(
+            widget,
+            &state
+        );
     }
 }
 
@@ -868,7 +879,11 @@ static void layer_status_update_cb(
         widget,
         node
     ) {
-        set_layer_status(widget, state);
+
+        set_layer_status(
+            widget,
+            state
+        );
     }
 }
 
@@ -880,8 +895,11 @@ static struct layer_status_state layer_status_get_state(
         zmk_keymap_highest_layer_active();
 
     return (struct layer_status_state) {
+
         .index = index,
-        .label = zmk_keymap_layer_name(index)
+
+        .label =
+            zmk_keymap_layer_name(index)
     };
 }
 
@@ -907,7 +925,12 @@ static uint8_t get_current_modifiers(void) {
         zmk_hid_get_explicit_mods();
 
 #if IS_ENABLED(CONFIG_ZMK_WIDGET_MODIFIERS_DEBUG)
-    LOG_INF("Current mods: %02x", mods);
+
+    LOG_INF(
+        "Current mods: %02x",
+        mods
+    );
+
 #endif
 
     return mods;
@@ -922,6 +945,10 @@ static void modifier_work_handler(
     uint32_t current_time =
         k_uptime_get_32();
 
+    /* ------------------------------------------------------------------
+     * Debounce
+     * ------------------------------------------------------------------ */
+
     if (debounce_check_scheduled) {
 
         debounce_check_scheduled = false;
@@ -929,7 +956,8 @@ static void modifier_work_handler(
         if (
             !keys_active &&
             (
-                current_time - last_key_event >=
+                current_time -
+                last_key_event >=
                 KEY_DEBOUNCE_INTERVAL
             )
         ) {
@@ -963,16 +991,19 @@ static void modifier_work_handler(
 
             k_work_schedule(
                 &modifier_work,
-                K_MSEC(KEY_DEBOUNCE_INTERVAL)
+                K_MSEC(
+                    KEY_DEBOUNCE_INTERVAL
+                )
             );
 
-            debounce_check_scheduled = true;
+            debounce_check_scheduled =
+                true;
         }
     }
 
-    /* --------------------------------------------------------------
+    /* ------------------------------------------------------------------
      * Modifier state
-     * -------------------------------------------------------------- */
+     * ------------------------------------------------------------------ */
 
     uint8_t mods =
         get_current_modifiers();
@@ -985,11 +1016,19 @@ static void modifier_work_handler(
         node
     ) {
 
-        if (widget->state.modifiers != mods) {
+        if (
+            widget->state.modifiers !=
+            mods
+        ) {
 
-            widget->state.modifiers = mods;
+            widget->state.modifiers =
+                mods;
 
-            for (int i = 0; i < NUM_SYMBOLS; i++) {
+            for (
+                int i = 0;
+                i < NUM_SYMBOLS;
+                i++
+            ) {
 
                 modifier_symbols[i]->is_active =
                     (
@@ -1016,14 +1055,18 @@ static void process_keypress_event(
     struct zmk_widget_status *widget
 ) {
 
-    key_pressed = is_pressed;
-    key_released = !is_pressed;
+    key_pressed =
+        is_pressed;
+
+    key_released =
+        !is_pressed;
 
     if (is_pressed) {
 
         active_keys++;
 
-        keys_active = true;
+        keys_active =
+            true;
 
         last_key_event =
             k_uptime_get_32();
@@ -1043,10 +1086,13 @@ static void process_keypress_event(
 
     k_work_schedule(
         &modifier_work,
-        K_MSEC(KEY_DEBOUNCE_INTERVAL)
+        K_MSEC(
+            KEY_DEBOUNCE_INTERVAL
+        )
     );
 
-    debounce_check_scheduled = true;
+    debounce_check_scheduled =
+        true;
 
     draw_middle(
         widget->obj,
@@ -1058,8 +1104,10 @@ static void process_keypress_event(
 /* ==========================================================================
  * WPM / KEY EVENT LISTENER
  *
- * WPM is no longer displayed.
- * It is still used to control BongoCat's animation speed/state.
+ * WPM wird nicht mehr auf dem Display angezeigt.
+ *
+ * Es wird intern weiterhin verwendet, um den BongoCat zwischen
+ * Casual und Frenzied Animation umzuschalten.
  * ========================================================================== */
 
 static void wpm_status_update_cb(
@@ -1077,6 +1125,10 @@ static void wpm_status_update_cb(
         uint32_t current_time =
             k_uptime_get_32();
 
+        /* --------------------------------------------------------------
+         * Key event
+         * -------------------------------------------------------------- */
+
         if (state.is_key_event) {
 
             last_keypress_time =
@@ -1088,26 +1140,31 @@ static void wpm_status_update_cb(
             );
         }
 
-        /*
-         * Use recent WPM to switch between casual and furious
-         * BongoCat animation.
-         */
+        /* --------------------------------------------------------------
+         * Recent WPM
+         * -------------------------------------------------------------- */
 
         int recent_wpm = 0;
 
         for (int i = 5; i < 10; i++) {
+
             recent_wpm +=
                 widget->state.wpm[i];
         }
 
         recent_wpm /= 5;
 
+        /* --------------------------------------------------------------
+         * Animation mode
+         * -------------------------------------------------------------- */
+
         if (recent_wpm > 30) {
 
             current_anim_state =
                 ANIM_STATE_FRENZIED;
 
-            leaving_furious = false;
+            leaving_furious =
+                false;
 
         } else if (
             current_anim_state ==
@@ -1117,7 +1174,8 @@ static void wpm_status_update_cb(
             current_anim_state =
                 ANIM_STATE_CASUAL;
 
-            leaving_furious = true;
+            leaving_furious =
+                true;
 
             current_idle_state =
                 IDLE_EXHALE;
@@ -1126,23 +1184,21 @@ static void wpm_status_update_cb(
                 current_time;
         }
 
-        /*
-         * Keep WPM history internally for animation logic.
-         */
+        /* --------------------------------------------------------------
+         * Internal WPM history
+         * -------------------------------------------------------------- */
 
-        if (state.wpm > 0) {
+        for (int i = 0; i < 9; i++) {
 
-            for (int i = 0; i < 9; i++) {
-                widget->state.wpm[i] =
-                    widget->state.wpm[i + 1];
-            }
-
-            widget->state.wpm[9] =
-                state.wpm;
-
-            last_wpm_update =
-                current_time;
+            widget->state.wpm[i] =
+                widget->state.wpm[i + 1];
         }
+
+        widget->state.wpm[9] =
+            state.wpm;
+
+        last_wpm_update =
+            current_time;
     }
 }
 
@@ -1160,9 +1216,15 @@ struct wpm_status_state wpm_status_get_state(
     const struct zmk_position_state_changed *pos_ev =
         as_zmk_position_state_changed(eh);
 
-    bool is_key_event = false;
+    bool is_key_event =
+        false;
 
-    bool key_is_pressed = false;
+    bool key_is_pressed =
+        false;
+
+    /* ------------------------------------------------------------------
+     * WPM event
+     * ------------------------------------------------------------------ */
 
     if (wpm_ev != NULL) {
 
@@ -1170,6 +1232,7 @@ struct wpm_status_state wpm_status_get_state(
             wpm_ev->state;
 
         for (int i = 0; i < 9; i++) {
+
             wpm_history[i] =
                 wpm_history[i + 1];
         }
@@ -1178,9 +1241,14 @@ struct wpm_status_state wpm_status_get_state(
             current_wpm;
     }
 
+    /* ------------------------------------------------------------------
+     * Position event
+     * ------------------------------------------------------------------ */
+
     if (pos_ev != NULL) {
 
-        is_key_event = true;
+        is_key_event =
+            true;
 
         key_is_pressed =
             pos_ev->state > 0;
@@ -1248,29 +1316,31 @@ static void animation_work_handler(
     uint32_t current_time =
         k_uptime_get_32();
 
-    bool needs_redraw = false;
+    bool needs_redraw =
+        false;
 
-    /* --------------------------------------------------------------
+    /* ------------------------------------------------------------------
      * Idle animation
-     * -------------------------------------------------------------- */
+     * ------------------------------------------------------------------ */
 
     if (
-        current_time - last_idle_update >
+        current_time -
+        last_idle_update >
         IDLE_ANIMATION_INTERVAL
     ) {
 
         last_idle_update =
             current_time;
 
-        /*
-         * If furious mode has been inactive for a while,
-         * return to casual mode.
-         */
+        /* --------------------------------------------------------------
+         * Exit furious mode after inactivity
+         * -------------------------------------------------------------- */
 
         if (
             current_anim_state ==
                 ANIM_STATE_FRENZIED &&
-            current_time - last_keypress_time >
+            current_time -
+                last_keypress_time >
                 WPM_UPDATE_INTERVAL * 2
         ) {
 
@@ -1283,12 +1353,13 @@ static void animation_work_handler(
             breathing_interval_adjustment =
                 get_random_adjustment();
 
-            needs_redraw = true;
+            needs_redraw =
+                true;
         }
 
-        /*
-         * Do not run idle breathing while keys are being held.
-         */
+        /* --------------------------------------------------------------
+         * Idle breathing
+         * -------------------------------------------------------------- */
 
         if (!keys_active) {
 
@@ -1299,7 +1370,8 @@ static void animation_work_handler(
                 current_idle_state =
                     IDLE_REST1;
 
-                needs_redraw = true;
+                needs_redraw =
+                    true;
 
                 break;
 
@@ -1308,7 +1380,8 @@ static void animation_work_handler(
                 current_idle_state =
                     IDLE_EXHALE;
 
-                needs_redraw = true;
+                needs_redraw =
+                    true;
 
                 break;
 
@@ -1318,10 +1391,12 @@ static void animation_work_handler(
                     IDLE_REST2;
 
                 if (leaving_furious) {
-                    leaving_furious = false;
+                    leaving_furious =
+                        false;
                 }
 
-                needs_redraw = true;
+                needs_redraw =
+                    true;
 
                 break;
 
@@ -1336,16 +1411,17 @@ static void animation_work_handler(
                         get_random_adjustment();
                 }
 
-                needs_redraw = true;
+                needs_redraw =
+                    true;
 
                 break;
             }
         }
     }
 
-    /* --------------------------------------------------------------
-     * Redraw BongoCat if animation changed.
-     * -------------------------------------------------------------- */
+    /* ------------------------------------------------------------------
+     * Redraw BongoCat
+     * ------------------------------------------------------------------ */
 
     if (needs_redraw) {
 
@@ -1365,9 +1441,9 @@ static void animation_work_handler(
         }
     }
 
-    /*
-     * Check animation frequently enough for smooth key response.
-     */
+    /* ------------------------------------------------------------------
+     * Schedule next animation check
+     * ------------------------------------------------------------------ */
 
     uint32_t next_check =
         MIN(
@@ -1383,6 +1459,29 @@ static void animation_work_handler(
 
 /* ==========================================================================
  * INITIALIZATION
+ *
+ * Logical layout:
+ *
+ *     ┌──────────┬──────────┬──────────┐
+ *     │  BOTTOM  │  MIDDLE  │   TOP    │
+ *     │  68x68   │  68x68   │  68x68   │
+ *     └──────────┴──────────┴──────────┘
+ *
+ * Physical display:
+ *
+ *     ┌──────────┐
+ *     │   TOP    │
+ *     │          │
+ *     ├──────────┤
+ *     │  MIDDLE  │
+ *     │          │
+ *     ├──────────┤
+ *     │  BOTTOM  │
+ *     │          │
+ *     └──────────┘
+ *
+ * Physical size: 68 x 160
+ *
  * ========================================================================== */
 
 int zmk_widget_status_init(
@@ -1391,19 +1490,12 @@ int zmk_widget_status_init(
 ) {
 
     /*
-     * Parent is deliberately 160x68.
+     * IMPORTANT:
      *
-     * The three 68x68 canvases are arranged horizontally:
+     * The display is physically mounted portrait.
      *
-     *     [ BOTTOM ][ MIDDLE ][ TOP ]
-     *
-     * After rotate_canvas() this becomes physically:
-     *
-     *     [ TOP ]
-     *     [ MIDDLE ]
-     *     [ BOTTOM ]
-     *
-     * on the portrait-mounted 68x160 display.
+     * The LVGL parent remains 160x68 because each individual
+     * 68x68 canvas is rotated by rotate_canvas().
      */
 
     widget->obj =
@@ -1417,6 +1509,9 @@ int zmk_widget_status_init(
 
     /* ------------------------------------------------------------------
      * TOP CANVAS
+     *
+     * Right side of logical canvas.
+     * Becomes top section after rotation.
      * ------------------------------------------------------------------ */
 
     lv_obj_t *top =
@@ -1439,6 +1534,9 @@ int zmk_widget_status_init(
 
     /* ------------------------------------------------------------------
      * MIDDLE CANVAS
+     *
+     * Center of logical canvas.
+     * Becomes middle section after rotation.
      * ------------------------------------------------------------------ */
 
     lv_obj_t *middle =
@@ -1461,6 +1559,9 @@ int zmk_widget_status_init(
 
     /* ------------------------------------------------------------------
      * BOTTOM CANVAS
+     *
+     * Left side of logical canvas.
+     * Becomes bottom section after rotation.
      * ------------------------------------------------------------------ */
 
     lv_obj_t *bottom =
@@ -1495,12 +1596,15 @@ int zmk_widget_status_init(
      * ------------------------------------------------------------------ */
 
     widget_battery_status_init();
+
     widget_output_status_init();
+
     widget_layer_status_init();
+
     widget_wpm_status_init();
 
     /* ------------------------------------------------------------------
-     * Initialize workers
+     * Initialize animation worker
      * ------------------------------------------------------------------ */
 
     k_work_init_delayable(
@@ -1515,20 +1619,27 @@ int zmk_widget_status_init(
 
     k_work_schedule(
         &animation_work,
-        K_MSEC(IDLE_ANIMATION_INTERVAL)
+        K_MSEC(
+            IDLE_ANIMATION_INTERVAL
+        )
     );
 
     /* ------------------------------------------------------------------
      * Initial modifier state
      * ------------------------------------------------------------------ */
 
-    for (int i = 0; i < NUM_SYMBOLS; i++) {
+    for (
+        int i = 0;
+        i < NUM_SYMBOLS;
+        i++
+    ) {
 
         modifier_symbols[i]->is_active =
             false;
     }
 
-    widget->state.modifiers = 0;
+    widget->state.modifiers =
+        0;
 
     /* ------------------------------------------------------------------
      * Initial draw
