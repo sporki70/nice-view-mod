@@ -124,7 +124,8 @@ int zmk_widget_status_init(struct zmk_widget_status *widget, lv_obj_t *parent) {
     const lv_img_dsc_t *images[] = {
         &balloon,
         &jelllyfish,
-        &seahorse
+        &seahorse,
+        &char_pikachu
     };
 
     lv_img_set_src(art, images[random]);
