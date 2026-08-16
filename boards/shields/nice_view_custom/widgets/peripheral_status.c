@@ -111,22 +111,22 @@ ZMK_SUBSCRIPTION(widget_peripheral_status, zmk_split_peripheral_status_changed);
 int zmk_widget_status_init(struct zmk_widget_status *widget, lv_obj_t *parent) {
     widget->obj = lv_obj_create(parent);
     lv_obj_set_size(widget->obj, 160, 68);
-
+    
     /* Status canvas MUST remain child 0 */
     lv_obj_t *top = lv_canvas_create(widget->obj);
-    lv_obj_align(top, LV_ALIGN_TOP_LEFT, 0, 0);
+    lv_obj_align(top, LV_ALIGN_TOP_RIGHT, 0, 0);
     lv_canvas_set_buffer(top, widget->cbuf, CANVAS_SIZE, CANVAS_SIZE,
                           LV_IMG_CF_TRUE_COLOR);
-
+    
     /* Artwork */
     lv_obj_t *art = lv_img_create(widget->obj);
     uint32_t random = sys_rand32_get() % 3;
     const lv_img_dsc_t *images[] = {&balloon, &jelllyfish, &seahorse};
-
+    
     lv_img_set_src(art, images[random]);
-
-    /* Move artwork down on the physical display */
-    lv_obj_align(art, LV_ALIGN_TOP_LEFT, 68, 0);
+    
+    /* Artwork gets the remaining 92 px */
+    lv_obj_align(art, LV_ALIGN_TOP_LEFT, 0, 0);
 
     /* Status must be drawn above the artwork */
     lv_obj_move_foreground(top);
