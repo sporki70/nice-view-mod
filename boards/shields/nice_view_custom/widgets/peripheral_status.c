@@ -127,8 +127,7 @@ int zmk_widget_status_init(struct zmk_widget_status *widget, lv_obj_t *parent) {
         &seahorse
     };
 
-    rotated_image = lv_image_set_rotation(images[random], 900);
-    lv_img_set_src(art, image);
+    lv_img_set_src(art, images[random]);
     
     /*
      * 68px status + 92px artwork = 160px total
