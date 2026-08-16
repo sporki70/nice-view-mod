@@ -90,8 +90,8 @@ struct layer_status_state {
 /* ==========================================================================
  * WPM state
  *
- * WPM wird nicht angezeigt.
- * WPM steuert ausschließlich die Bongo-Animation.
+ * WPM wird NICHT angezeigt.
+ * WPM steuert ausschließlich Bongo Cat.
  * ========================================================================== */
 
 struct wpm_status_state {
@@ -125,9 +125,12 @@ static enum idle_anim_state current_idle_state =
     IDLE_INHALE;
 
 
+/* ==========================================================================
+ * Bongo state
+ * ========================================================================== */
+
 static const lv_img_dsc_t *last_active_frame =
     &bongo_resting;
-
 
 static bool use_first_frame = true;
 
@@ -137,9 +140,17 @@ static bool keys_active = false;
 
 static uint8_t active_keys = 0;
 
+
+/* ==========================================================================
+ * Timing
+ * ========================================================================== */
+
+static uint32_t last_key_event = 0;
+
 static uint32_t last_idle_update = 0;
 
-static const uint32_t IDLE_ANIMATION_INTERVAL = 750;
+static const uint32_t IDLE_ANIMATION_INTERVAL =
+    750;
 
 
 /* ==========================================================================
@@ -185,6 +196,7 @@ static bool modifier_work_scheduled = false;
  * ========================================================================== */
 
 static uint8_t get_current_modifiers(void) {
+
     return zmk_hid_get_explicit_mods();
 }
 
@@ -193,7 +205,9 @@ static uint8_t get_current_modifiers(void) {
  * WPM -> Bongo
  * ========================================================================== */
 
-static void update_bongo_from_wpm(uint8_t wpm) {
+static void update_bongo_from_wpm(
+    uint8_t wpm
+) {
 
     /*
      * Über 30 WPM:
@@ -212,8 +226,7 @@ static void update_bongo_from_wpm(uint8_t wpm) {
 
 
     /*
-     * Furious verlassen,
-     * sobald WPM wieder <= 30 ist.
+     * Furious verlassen.
      */
 
     if (current_anim_state == ANIM_STATE_FRENZIED) {
@@ -265,6 +278,7 @@ static const lv_img_dsc_t *get_bongo_frame(void) {
 
 
         if (keys_active) {
+
             return last_active_frame;
         }
     }
@@ -297,6 +311,7 @@ static const lv_img_dsc_t *get_bongo_frame(void) {
 
 
         if (keys_active) {
+
             return last_active_frame;
         }
     }
@@ -309,17 +324,24 @@ static const lv_img_dsc_t *get_bongo_frame(void) {
     switch (current_idle_state) {
 
     case IDLE_INHALE:
+
         return &bongo_inhale;
 
+
     case IDLE_REST1:
+
         return &bongo_resting;
 
+
     case IDLE_EXHALE:
+
         return &bongo_exhale;
+
 
     case IDLE_REST2:
 
     default:
+
         return &bongo_resting;
     }
 }
@@ -328,14 +350,9 @@ static const lv_img_dsc_t *get_bongo_frame(void) {
 /* ==========================================================================
  * TOP PANEL
  *
- * Dieses Panel wird physisch ganz oben dargestellt.
+ * Dieses Panel erscheint nach der Rotation PHYSISCH OBEN.
  *
- * Nach Rotation:
- *
- * ┌────────────────────┐
- * │ Battery       WiFi │
- * └────────────────────┘
- *
+ * Battery + WiFi
  * ========================================================================== */
 
 static void draw_top(
@@ -359,7 +376,6 @@ static void draw_top(
         LVGL_BACKGROUND
     );
 
-
     lv_canvas_draw_rect(
         canvas,
         0,
@@ -381,7 +397,7 @@ static void draw_top(
 
 
     /* ----------------------------------------------------------------------
-     * USB / Bluetooth
+     * Connection
      * ---------------------------------------------------------------------- */
 
 #if !IS_ENABLED(CONFIG_ZMK_SPLIT) || \
@@ -445,12 +461,13 @@ static void draw_top(
 
 
     default:
+
         break;
     }
 
 
     /*
-     * WiFi / USB oben rechts.
+     * Rechts oben im 68x68 Panel.
      */
 
     lv_canvas_draw_text(
@@ -465,9 +482,9 @@ static void draw_top(
 #endif
 
 
-    /* ----------------------------------------------------------------------
-     * Rotation
-     * ---------------------------------------------------------------------- */
+    /*
+     * Rotation.
+     */
 
     rotate_canvas(
         canvas,
@@ -479,15 +496,10 @@ static void draw_top(
 /* ==========================================================================
  * MIDDLE PANEL
  *
- * Physisch:
+ * Dieses Panel erscheint PHYSISCH IN DER MITTE.
  *
- * ┌────────────────────┐
- * │                    │
- * │     BONGO CAT      │
- * │                    │
- * │ CTRL SHIFT ALT WIN │
- * └────────────────────┘
- *
+ * Bongo
+ * Modifier
  * ========================================================================== */
 
 static void draw_middle(
@@ -510,7 +522,6 @@ static void draw_middle(
         &bg,
         LVGL_BACKGROUND
     );
-
 
     lv_canvas_draw_rect(
         canvas,
@@ -541,26 +552,16 @@ static void draw_middle(
         frame->header.w;
 
 
-    int image_height =
-        frame->header.h;
-
-
-    /*
-     * Horizontal zentrieren.
-     */
-
     int x =
         (CANVAS_SIZE - image_width) / 2;
 
 
     /*
-     * Bongo oben im mittleren Panel.
+     * Bongo etwas weiter oben,
+     * damit unten genug Platz für Modifier bleibt.
      */
 
     int y = 3;
-
-
-    ARG_UNUSED(image_height);
 
 
     lv_canvas_draw_img(
@@ -600,15 +601,10 @@ static void draw_middle(
 /* ==========================================================================
  * BOTTOM PANEL
  *
- * Physisch:
+ * Dieses Panel erscheint nach der Rotation PHYSISCH UNTEN.
  *
- * ┌────────────────────┐
- * │                    │
- * │ Bluetooth      1   │
- * │                    │
- * │              L0    │
- * └────────────────────┘
- *
+ * Bluetooth Profil
+ * Layer
  * ========================================================================== */
 
 static void draw_bottom(
@@ -632,7 +628,6 @@ static void draw_bottom(
         LVGL_BACKGROUND
     );
 
-
     lv_canvas_draw_rect(
         canvas,
         0,
@@ -646,9 +641,9 @@ static void draw_bottom(
 #if !IS_ENABLED(CONFIG_ZMK_SPLIT) || \
     IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
 
-    /* ======================================================================
-     * Bluetooth Profile
-     * ====================================================================== */
+    /* ----------------------------------------------------------------------
+     * Bluetooth profile
+     * ---------------------------------------------------------------------- */
 
     lv_draw_arc_dsc_t arc;
 
@@ -664,27 +659,23 @@ static void draw_bottom(
     init_arc_dsc(
         &arc_filled,
         LVGL_FOREGROUND,
-        6
+        7
     );
 
 
     /*
-     * Position innerhalb des 68x68 Bottom-Panels.
+     * Profil ungefähr mittig.
      */
 
     const int profile_x = 18;
-    const int profile_y = 27;
+    const int profile_y = 34;
 
-
-    /*
-     * Äußerer Kreis.
-     */
 
     lv_canvas_draw_arc(
         canvas,
         profile_x,
         profile_y,
-        10,
+        11,
         0,
         360,
         &arc
@@ -692,14 +683,14 @@ static void draw_bottom(
 
 
     /*
-     * Innerer gefüllter Kreis.
+     * Innerer Kreis zeigt aktives Profil.
      */
 
     lv_canvas_draw_arc(
         canvas,
         profile_x,
         profile_y,
-        6,
+        7,
         0,
         359,
         &arc_filled
@@ -707,7 +698,7 @@ static void draw_bottom(
 
 
     /* ----------------------------------------------------------------------
-     * Profile Nummer
+     * Profilnummer
      * ---------------------------------------------------------------------- */
 
     lv_draw_label_dsc_t profile_label;
@@ -743,9 +734,9 @@ static void draw_bottom(
     );
 
 
-    /* ======================================================================
+    /* ----------------------------------------------------------------------
      * Layer
-     * ====================================================================== */
+     * ---------------------------------------------------------------------- */
 
     lv_draw_label_dsc_t layer_label;
 
@@ -781,13 +772,13 @@ static void draw_bottom(
 
 
     /*
-     * Layer rechts neben / unter dem Bluetooth-Profil.
+     * Layer rechts neben dem Bluetooth-Profil.
      */
 
     lv_canvas_draw_text(
         canvas,
         34,
-        22,
+        28,
         30,
         &layer_label,
         layer_text
@@ -878,6 +869,7 @@ battery_status_get_state(
             zmk_usb_is_powered(),
 
 #endif
+
     };
 }
 
@@ -1123,10 +1115,14 @@ static void process_keypress_event(
     key_released =
         !pressed;
 
+    last_key_event =
+        k_uptime_get_32();
+
 
     if (pressed) {
 
         if (active_keys < UINT8_MAX) {
+
             active_keys++;
         }
 
@@ -1136,6 +1132,7 @@ static void process_keypress_event(
     } else {
 
         if (active_keys > 0) {
+
             active_keys--;
         }
 
@@ -1270,6 +1267,10 @@ wpm_status_get_state(
     bool pressed = false;
 
 
+    /* ----------------------------------------------------------------------
+     * WPM
+     * ---------------------------------------------------------------------- */
+
     if (wpm_ev != NULL) {
 
         current_wpm =
@@ -1280,6 +1281,10 @@ wpm_status_get_state(
         );
     }
 
+
+    /* ----------------------------------------------------------------------
+     * Key
+     * ---------------------------------------------------------------------- */
 
     if (pos_ev != NULL) {
 
@@ -1387,6 +1392,7 @@ static void animation_work_handler(
 
 
     if (interval < 250) {
+
         interval = 250;
     }
 
@@ -1428,7 +1434,9 @@ static void animation_work_handler(
                 IDLE_REST2;
 
             if (leaving_furious) {
-                leaving_furious = false;
+
+                leaving_furious =
+                    false;
             }
 
             break;
@@ -1499,42 +1507,54 @@ int zmk_widget_status_init(
 
     /*
      * ======================================================================
-     * WICHTIG
      *
-     * Das logische Display ist 160 x 68.
+     * nice!view:
      *
-     * Das physische Display ist nach rotate_canvas():
+     * Physische Auflösung:
      *
-     *                 68 x 160
+     *                 68 px
+     *              ┌────────┐
+     *              │ Battery│
+     *              │  WiFi  │
+     *              │        │
+     *              │ Bongo  │
+     *              │        │
+     *              │Modifier│
+     *              │        │
+     *              │Profile │
+     *              │        │
+     *              │ Layer  │
+     *              └────────┘
+     *                 160 px
+     *
+     * ======================================================================
+     *
+     * Das Display ist logisch 160x68.
      *
      * Wir verwenden drei 68x68 Canvas.
      *
-     * Canvas 0:
-     *     Battery + WiFi
+     * Nach Rotation:
      *
-     * Canvas 1:
-     *     Bongo + Modifier
+     *   CANVAS 0 -> physisch OBEN
+     *   CANVAS 1 -> physisch MITTE
+     *   CANVAS 2 -> physisch UNTEN
      *
-     * Canvas 2:
-     *     Bluetooth Profile + Layer
+     * WICHTIG:
      *
-     * Die X-Positionen sind absichtlich:
+     * Die Reihenfolge der X-Positionen ist wegen rotate_canvas
+     * gegenüber der intuitiven Reihenfolge umgedreht.
      *
-     *     TOP     = 92
-     *     MIDDLE  = 24
-     *     BOTTOM  = -44
-     *
-     * Nach der Rotation liegen sie physisch
-     * exakt untereinander.
      * ======================================================================
      */
+
 
     widget->obj =
         lv_obj_create(parent);
 
 
     /*
-     * Das Parent-Layout bleibt logisch 160 x 68.
+     * Das Parent-Widget muss die komplette logische nice!view-Fläche
+     * haben.
      */
 
     lv_obj_set_size(
@@ -1545,7 +1565,10 @@ int zmk_widget_status_init(
 
 
     /* ======================================================================
-     * TOP CANVAS
+     * PHYSISCH OBEN
+     *
+     * Battery + WiFi
+     *
      * ====================================================================== */
 
     lv_obj_t *top =
@@ -1553,15 +1576,18 @@ int zmk_widget_status_init(
 
 
     /*
-     * 92..160
+     * WICHTIG:
      *
-     * Nach Rotation = oberster Bereich.
+     * NICHT x = 92!
+     *
+     * Nach rotate_canvas entspricht dieser Bereich dem physischen
+     * oberen Bereich.
      */
 
     lv_obj_align(
         top,
         LV_ALIGN_TOP_LEFT,
-        92,
+        -44,
         0
     );
 
@@ -1576,18 +1602,15 @@ int zmk_widget_status_init(
 
 
     /* ======================================================================
-     * MIDDLE CANVAS
+     * PHYSISCH MITTE
+     *
+     * Bongo + Modifier
+     *
      * ====================================================================== */
 
     lv_obj_t *middle =
         lv_canvas_create(widget->obj);
 
-
-    /*
-     * 24..92
-     *
-     * Nach Rotation = mittlerer Bereich.
-     */
 
     lv_obj_align(
         middle,
@@ -1607,7 +1630,10 @@ int zmk_widget_status_init(
 
 
     /* ======================================================================
-     * BOTTOM CANVAS
+     * PHYSISCH UNTEN
+     *
+     * Bluetooth Profil + Layer
+     *
      * ====================================================================== */
 
     lv_obj_t *bottom =
@@ -1615,15 +1641,16 @@ int zmk_widget_status_init(
 
 
     /*
-     * -44..24
+     * Das ist absichtlich 92.
      *
-     * Nach Rotation = unterster Bereich.
+     * Dadurch landet dieses Panel nach rotate_canvas am unteren Ende
+     * des 160px hohen Displays.
      */
 
     lv_obj_align(
         bottom,
         LV_ALIGN_TOP_LEFT,
-        -44,
+        92,
         0
     );
 
@@ -1648,7 +1675,7 @@ int zmk_widget_status_init(
 
 
     /* ======================================================================
-     * Listener initialisieren
+     * Listener
      * ====================================================================== */
 
     widget_battery_status_init();
@@ -1708,6 +1735,12 @@ int zmk_widget_status_init(
     );
 
 
+    k_work_schedule(
+        &animation_work,
+        K_MSEC(100)
+    );
+
+
     /* ======================================================================
      * Initial draw
      * ====================================================================== */
@@ -1733,16 +1766,6 @@ int zmk_widget_status_init(
     );
 
 
-    /* ======================================================================
-     * Animation starten
-     * ====================================================================== */
-
-    k_work_schedule(
-        &animation_work,
-        K_MSEC(100)
-    );
-
-
     return 0;
 }
 
@@ -1754,5 +1777,6 @@ int zmk_widget_status_init(
 lv_obj_t *zmk_widget_status_obj(
     struct zmk_widget_status *widget
 ) {
+
     return widget->obj;
 }
