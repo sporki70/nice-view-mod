@@ -1,6 +1,6 @@
 /*
  *
- * Copyright (c) 2023 The ZMK Contributors
+ * Copyright (c) 2025 The ZMK Contributors
  * SPDX-License-Identifier: MIT
  *
  */
@@ -23,7 +23,6 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 #include <zmk/events/wpm_state_changed.h>
 #include <zmk/events/layer_state_changed.h>
 #include <zmk/events/position_state_changed.h>
-#include <zmk/events/keycode_state_changed.h>
 
 #include <zmk/usb.h>
 #include <zmk/ble.h>
@@ -37,9 +36,29 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
 #include "bongocatart.h"
 
-/* --------------------------------------------------------------------------
- * Modifier declaration
- * -------------------------------------------------------------------------- */
+/* ==========================================================================
+ * CONFIGURATION
+ * ========================================================================== */
+
+#ifndef NICEVIEW_PROFILE_COUNT
+#define NICEVIEW_PROFILE_COUNT 5
+#endif
+
+#define BONGO_CANVAS_SIZE 68
+
+/* Idle animation interval */
+static const uint32_t IDLE_ANIMATION_INTERVAL = 750;
+
+/* Key debounce */
+static const uint32_t KEY_DEBOUNCE_INTERVAL = 20;
+
+/* WPM timing */
+static const uint32_t WPM_UPDATE_INTERVAL = 1000;
+static const uint32_t WPM_PAUSE_TIMEOUT = 10000;
+
+/* ==========================================================================
+ * MODIFIER IMAGES
+ * ========================================================================== */
 
 LV_IMG_DECLARE(control_icon);
 LV_IMG_DECLARE(shift_icon);
@@ -52,9 +71,9 @@ LV_IMG_DECLARE(alt_icon);
 LV_IMG_DECLARE(win_icon);
 #endif
 
-/* --------------------------------------------------------------------------
- * BongoCat images
- * -------------------------------------------------------------------------- */
+/* ==========================================================================
+ * BONGO CAT IMAGES
+ * ========================================================================== */
 
 LV_IMG_DECLARE(bongocatrest0);
 LV_IMG_DECLARE(bongocatcasual1);
@@ -70,21 +89,21 @@ LV_IMG_DECLARE(bongo_furiousdown);
 LV_IMG_DECLARE(bongo_inhale);
 LV_IMG_DECLARE(bongo_exhale);
 
-/* --------------------------------------------------------------------------
- * Forward declarations
- * -------------------------------------------------------------------------- */
+/* ==========================================================================
+ * FORWARD DECLARATIONS
+ * ========================================================================== */
 
 static uint8_t get_current_modifiers(void);
 
-/* --------------------------------------------------------------------------
- * Widget list
- * -------------------------------------------------------------------------- */
+/* ==========================================================================
+ * WIDGET LIST
+ * ========================================================================== */
 
 static sys_slist_t widgets = SYS_SLIST_STATIC_INIT(&widgets);
 
-/* --------------------------------------------------------------------------
- * State structures
- * -------------------------------------------------------------------------- */
+/* ==========================================================================
+ * OUTPUT STATE
+ * ========================================================================== */
 
 struct output_status_state {
     struct zmk_endpoint_instance selected_endpoint;
@@ -93,12 +112,26 @@ struct output_status_state {
 
     bool active_profile_connected;
     bool active_profile_bonded;
+
+    bool profiles_connected[NICEVIEW_PROFILE_COUNT];
+    bool profiles_bonded[NICEVIEW_PROFILE_COUNT];
 };
 
+/* ==========================================================================
+ * LAYER STATE
+ * ========================================================================== */
+
 struct layer_status_state {
-    uint8_t index;
+    zmk_keymap_layer_index_t index;
     const char *label;
 };
+
+/* ==========================================================================
+ * WPM STATE
+ *
+ * WPM is NOT rendered on the display.
+ * It is kept only for BongoCat animation logic.
+ * ========================================================================== */
 
 struct wpm_status_state {
     uint8_t wpm;
@@ -112,16 +145,21 @@ struct wpm_status_state {
     bool is_animation_update;
 };
 
-/* --------------------------------------------------------------------------
- * BongoCat animation state
- * -------------------------------------------------------------------------- */
+/* ==========================================================================
+ * BONGO ANIMATION STATE
+ * ========================================================================== */
 
 enum anim_state {
     ANIM_STATE_CASUAL,
     ANIM_STATE_FRENZIED
 };
 
-static enum anim_state current_anim_state = ANIM_STATE_CASUAL;
+static enum anim_state current_anim_state =
+    ANIM_STATE_CASUAL;
+
+/* --------------------------------------------------------------------------
+ * Idle breathing states
+ * -------------------------------------------------------------------------- */
 
 enum idle_anim_state {
     IDLE_INHALE,
@@ -130,23 +168,23 @@ enum idle_anim_state {
     IDLE_REST2
 };
 
-static enum idle_anim_state current_idle_state = IDLE_INHALE;
+static enum idle_anim_state current_idle_state =
+    IDLE_INHALE;
 
 static uint32_t last_idle_update = 0;
-
-static const uint32_t IDLE_ANIMATION_INTERVAL = 750;
 
 static int32_t breathing_interval_adjustment = 0;
 
 static bool leaving_furious = false;
 
-/* --------------------------------------------------------------------------
- * Random number state
- * -------------------------------------------------------------------------- */
+/* ==========================================================================
+ * RANDOM STATE
+ * ========================================================================== */
 
 static uint32_t random_seed = 7919;
 
 static int32_t get_random_adjustment(void) {
+
     static bool seed_initialized = false;
 
     if (!seed_initialized) {
@@ -154,76 +192,89 @@ static int32_t get_random_adjustment(void) {
         seed_initialized = true;
     }
 
-    random_seed = random_seed * 1103515245 + 12345;
+    random_seed =
+        random_seed * 1103515245 + 12345;
 
     return ((random_seed / 65536) % 501) - 250;
 }
 
-/* --------------------------------------------------------------------------
- * Key / animation state
- * -------------------------------------------------------------------------- */
+/* ==========================================================================
+ * KEY / ANIMATION STATE
+ * ========================================================================== */
 
 static bool key_pressed = false;
 static bool key_released = false;
+
 static bool keys_active = false;
 
 static uint8_t active_keys = 0;
 
 static bool use_first_frame = true;
 
-static const lv_img_dsc_t *last_active_frame = &bongo_resting;
+static const lv_img_dsc_t *last_active_frame =
+    &bongo_resting;
 
 static uint32_t last_key_event = 0;
-
-static const uint32_t KEY_DEBOUNCE_INTERVAL = 20;
 
 static bool debounce_check_scheduled = false;
 
 static uint32_t last_keypress_time = 0;
 
-static const uint32_t WPM_PAUSE_TIMEOUT = 10000;
-
 static uint32_t last_wpm_update = 0;
 
-static const uint32_t WPM_UPDATE_INTERVAL = 1000;
-
-/* --------------------------------------------------------------------------
- * Workers
- * -------------------------------------------------------------------------- */
+/* ==========================================================================
+ * WORKERS
+ * ========================================================================== */
 
 static struct k_work_delayable animation_work;
+
 static struct k_work_delayable modifier_work;
 
 /* ==========================================================================
- * TOP
+ * TOP SECTION
  *
- * Physisches Display: hochkant 68 x 160
+ * Physical display after rotation:
  *
- *     ┌────────────────┐
- *     │     AKKU       │
- *     │       WIFI     │
- *     └────────────────┘
+ *     ┌──────────────────┐
+ *     │       🔋    📶   │
+ *     │                  │
+ *     └──────────────────┘
  *
+ * WPM GRAPH IS INTENTIONALLY REMOVED.
  * ========================================================================== */
 
-static void draw_top(lv_obj_t *widget,
-                     lv_color_t cbuf[],
-                     const struct status_state *state) {
+static void draw_top(
+    lv_obj_t *widget,
+    lv_color_t cbuf[],
+    const struct status_state *state
+) {
 
-    lv_obj_t *canvas = lv_obj_get_child(widget, 0);
+    lv_obj_t *canvas =
+        lv_obj_get_child(widget, 0);
+
+    /* ------------------------------------------------------------------
+     * Drawing descriptors
+     * ------------------------------------------------------------------ */
 
     lv_draw_rect_dsc_t rect_black_dsc;
-    init_rect_dsc(&rect_black_dsc, LVGL_BACKGROUND);
+
+    init_rect_dsc(
+        &rect_black_dsc,
+        LVGL_BACKGROUND
+    );
 
     lv_draw_label_dsc_t label_dsc;
+
     init_label_dsc(
         &label_dsc,
         LVGL_FOREGROUND,
-        &lv_font_montserrat_14,
-        LV_TEXT_ALIGN_CENTER
+        &lv_font_montserrat_16,
+        LV_TEXT_ALIGN_RIGHT
     );
 
-    /* Clear canvas */
+    /* ------------------------------------------------------------------
+     * Clear canvas
+     * ------------------------------------------------------------------ */
 
     lv_canvas_draw_rect(
         canvas,
@@ -236,20 +287,32 @@ static void draw_top(lv_obj_t *widget,
 
     /* ------------------------------------------------------------------
      * Battery
+     *
+     * Keep the standard ZMK nice!view battery renderer.
      * ------------------------------------------------------------------ */
 
-    draw_battery(canvas, state);
+    draw_battery(
+        canvas,
+        state
+    );
 
     /* ------------------------------------------------------------------
-     * Connection status
+     * USB / BLE connection
      * ------------------------------------------------------------------ */
 
-    char output_text[8] = {};
+    char output_text[10] = {};
 
-    switch (state->selected_endpoint.transport) {
+    switch (
+        state->selected_endpoint.transport
+    ) {
 
     case ZMK_TRANSPORT_USB:
-        strcpy(output_text, LV_SYMBOL_USB);
+
+        strcpy(
+            output_text,
+            LV_SYMBOL_USB
+        );
+
         break;
 
     case ZMK_TRANSPORT_BLE:
@@ -257,71 +320,112 @@ static void draw_top(lv_obj_t *widget,
         if (state->active_profile_bonded) {
 
             if (state->active_profile_connected) {
-                strcpy(output_text, LV_SYMBOL_WIFI);
+
+                strcpy(
+                    output_text,
+                    LV_SYMBOL_WIFI
+                );
+
             } else {
-                strcpy(output_text, LV_SYMBOL_CLOSE);
+
+                strcpy(
+                    output_text,
+                    LV_SYMBOL_CLOSE
+                );
             }
 
         } else {
-            strcpy(output_text, LV_SYMBOL_SETTINGS);
+
+            strcpy(
+                output_text,
+                LV_SYMBOL_SETTINGS
+            );
         }
 
         break;
 
     default:
+
         output_text[0] = '\0';
+
         break;
     }
 
     /*
-     * Connection symbol.
-     *
-     * The canvas is rotated afterwards, therefore these coordinates
-     * refer to the logical 68x68 canvas.
+     * This coordinate system is the ORIGINAL 68x68 canvas.
+     * rotate_canvas() below converts it to the physical portrait
+     * orientation.
      */
 
     lv_canvas_draw_text(
         canvas,
-        40,
-        24,
-        24,
+        0,
+        0,
+        CANVAS_SIZE,
         &label_dsc,
         output_text
     );
 
-    /* Rotate canvas for physical portrait display */
+    /* ------------------------------------------------------------------
+     * Rotate the complete canvas.
+     * ------------------------------------------------------------------ */
 
-    rotate_canvas(canvas, cbuf);
+    rotate_canvas(
+        canvas,
+        cbuf
+    );
 }
 
 /* ==========================================================================
- * MIDDLE
+ * MIDDLE SECTION
  *
- * Physisches Display:
+ * Physical display:
  *
- *     ┌────────────────┐
- *     │                │
- *     │    BONGOCAT    │
- *     │                │
- *     │ CTRL ALT WIN   │
- *     │      SHIFT     │
- *     └────────────────┘
+ *     ┌──────────────────┐
+ *     │                  │
+ *     │     BONGO CAT    │
+ *     │                  │
+ *     │                  │
+ *     │ CTRL ALT WIN     │
+ *     │       SHIFT      │
+ *     │                  │
+ *     └──────────────────┘
  *
+ * IMPORTANT:
+ *
+ * The canvas is rotated.
+ * Therefore the X/Y values below intentionally look unusual.
  * ========================================================================== */
 
-static void draw_middle(lv_obj_t *widget,
-                        lv_color_t cbuf[],
-                        const struct status_state *state) {
+static void draw_middle(
+    lv_obj_t *widget,
+    lv_color_t cbuf[],
+    const struct status_state *state
+) {
 
-    lv_obj_t *canvas = lv_obj_get_child(widget, 1);
+    lv_obj_t *canvas =
+        lv_obj_get_child(widget, 1);
+
+    /* ------------------------------------------------------------------
+     * Descriptors
+     * ------------------------------------------------------------------ */
 
     lv_draw_rect_dsc_t rect_black_dsc;
-    init_rect_dsc(&rect_black_dsc, LVGL_BACKGROUND);
+
+    init_rect_dsc(
+        &rect_black_dsc,
+        LVGL_BACKGROUND
+    );
 
     lv_draw_img_dsc_t img_dsc;
-    lv_draw_img_dsc_init(&img_dsc);
 
-    /* Clear canvas */
+    lv_draw_img_dsc_init(
+        &img_dsc
+    );
+
+    /* ------------------------------------------------------------------
+     * Clear canvas
+     * ------------------------------------------------------------------ */
 
     lv_canvas_draw_rect(
         canvas,
@@ -333,175 +437,272 @@ static void draw_middle(lv_obj_t *widget,
     );
 
     /* ------------------------------------------------------------------
-     * Determine BongoCat frame
+     * Select BongoCat frame
      * ------------------------------------------------------------------ */
 
-    const lv_img_dsc_t *current_frame = &bongo_resting;
+    const lv_img_dsc_t *current_frame =
+        &bongo_resting;
 
-    if (current_anim_state == ANIM_STATE_CASUAL) {
+    /* ==================================================================
+     * CASUAL MODE
+     * ================================================================== */
+
+    if (
+        current_anim_state ==
+        ANIM_STATE_CASUAL
+    ) {
 
         if (key_pressed) {
 
             if (use_first_frame) {
-                last_active_frame = &bongo_casualright;
+
+                last_active_frame =
+                    &bongo_casualright;
+
             } else {
-                last_active_frame = &bongo_casualleft;
+
+                last_active_frame =
+                    &bongo_casualleft;
             }
 
-            use_first_frame = !use_first_frame;
+            use_first_frame =
+                !use_first_frame;
 
-            current_frame = last_active_frame;
+            current_frame =
+                last_active_frame;
 
         } else if (keys_active) {
 
-            current_frame = last_active_frame;
+            current_frame =
+                last_active_frame;
 
         } else if (
-            k_uptime_get_32() - last_key_event <=
+            k_uptime_get_32() -
+            last_key_event <=
             KEY_DEBOUNCE_INTERVAL
         ) {
 
-            current_frame = last_active_frame;
+            current_frame =
+                last_active_frame;
 
         } else {
 
-            switch (current_idle_state) {
+            switch (
+                current_idle_state
+            ) {
 
             case IDLE_INHALE:
-                current_frame = &bongo_inhale;
+
+                current_frame =
+                    &bongo_inhale;
+
                 break;
 
             case IDLE_REST1:
-                current_frame = &bongo_resting;
+
+                current_frame =
+                    &bongo_resting;
+
                 break;
 
             case IDLE_EXHALE:
-                current_frame = &bongo_exhale;
+
+                current_frame =
+                    &bongo_exhale;
+
                 break;
 
             case IDLE_REST2:
-                current_frame = &bongo_resting;
+
+                current_frame =
+                    &bongo_resting;
+
                 break;
 
             default:
-                current_frame = &bongo_resting;
+
+                current_frame =
+                    &bongo_resting;
+
                 break;
             }
         }
 
-    } else {
+    }
 
-        /* --------------------------------------------------------------
-         * Frenzied animation
-         * -------------------------------------------------------------- */
+    /* ==================================================================
+     * FURIOUS MODE
+     * ================================================================== */
 
-        if (key_pressed || key_released) {
+    else {
+
+        if (
+            key_pressed ||
+            key_released
+        ) {
 
             if (use_first_frame) {
-                last_active_frame = &bongo_furiousup;
+
+                last_active_frame =
+                    &bongo_furiousup;
+
             } else {
-                last_active_frame = &bongo_furiousdown;
+
+                last_active_frame =
+                    &bongo_furiousdown;
             }
 
-            use_first_frame = !use_first_frame;
+            use_first_frame =
+                !use_first_frame;
 
-            current_frame = last_active_frame;
+            current_frame =
+                last_active_frame;
 
         } else if (keys_active) {
 
-            current_frame = last_active_frame;
+            current_frame =
+                last_active_frame;
 
         } else if (
-            k_uptime_get_32() - last_key_event <=
+            k_uptime_get_32() -
+            last_key_event <=
             KEY_DEBOUNCE_INTERVAL
         ) {
 
-            current_frame = last_active_frame;
+            current_frame =
+                last_active_frame;
 
         } else {
 
-            switch (current_idle_state) {
+            switch (
+                current_idle_state
+            ) {
 
             case IDLE_INHALE:
-                current_frame = &bongo_inhale;
+
+                current_frame =
+                    &bongo_inhale;
+
                 break;
 
             case IDLE_REST1:
-                current_frame = &bongo_resting;
+
+                current_frame =
+                    &bongo_resting;
+
                 break;
 
             case IDLE_EXHALE:
-                current_frame = &bongo_exhale;
+
+                current_frame =
+                    &bongo_exhale;
+
                 break;
 
             case IDLE_REST2:
-                current_frame = &bongo_resting;
+
+                current_frame =
+                    &bongo_resting;
+
                 break;
 
             default:
-                current_frame = &bongo_resting;
+
+                current_frame =
+                    &bongo_resting;
+
                 break;
             }
         }
     }
 
     /* ------------------------------------------------------------------
-     * Draw BongoCat
-     *
-     * The BongoCat occupies the upper part of the logical canvas.
+     * Consume release event.
      * ------------------------------------------------------------------ */
 
     key_released = false;
 
+    /* ------------------------------------------------------------------
+     * Draw BongoCat.
+     *
+     * This uses the original nice!view coordinate convention.
+     * Do NOT move the image to y=0 just because the display is
+     * physically portrait.
+     * ------------------------------------------------------------------ */
+
     lv_canvas_draw_img(
         canvas,
         0,
-        0,
+        28,
         current_frame,
         &img_dsc
     );
 
     /* ------------------------------------------------------------------
-     * Modifier row
+     * Modifier icons
      *
-     * IMPORTANT:
-     * y=50 keeps the modifier icons inside the 68x68 canvas.
+     * Keep them in the same rotated-coordinate convention as the
+     * original nice!view widget.
+     *
+     * This places them underneath the BongoCat in the physical
+     * portrait orientation.
      * ------------------------------------------------------------------ */
 
     draw_modifiers(
         canvas,
         0,
-        50
+        13
     );
 
-    /* Rotate canvas for portrait display */
+    /* ------------------------------------------------------------------
+     * Rotate canvas.
+     * ------------------------------------------------------------------ */
 
-    rotate_canvas(canvas, cbuf);
+    rotate_canvas(
+        canvas,
+        cbuf
+    );
 }
 
 /* ==========================================================================
- * BOTTOM
+ * BOTTOM SECTION
  *
- * Physisches Display:
+ * Physical display:
  *
- *     ┌────────────────┐
- *     │  1  2  3  4  5 │
- *     │                │
- *     │     LAYER 0    │
- *     └────────────────┘
+ *     ┌──────────────────┐
+ *     │                  │
+ *     │  ①  ②  ③  ④  ⑤ │
+ *     │                  │
+ *     │      LAYER 0     │
+ *     │                  │
+ *     └──────────────────┘
  *
+ * The five profiles use the same geometry as the current ZMK nice!view
+ * widget.
  * ========================================================================== */
 
-static void draw_bottom(lv_obj_t *widget,
-                        lv_color_t cbuf[],
-                        const struct status_state *state) {
+static void draw_bottom(
+    lv_obj_t *widget,
+    lv_color_t cbuf[],
+    const struct status_state *state
+) {
 
-    lv_obj_t *canvas = lv_obj_get_child(widget, 2);
+    lv_obj_t *canvas =
+        lv_obj_get_child(widget, 2);
+
+    /* ------------------------------------------------------------------
+     * Drawing descriptors
+     * ------------------------------------------------------------------ */
 
     lv_draw_rect_dsc_t rect_black_dsc;
-    init_rect_dsc(&rect_black_dsc, LVGL_BACKGROUND);
+
+    init_rect_dsc(
+        &rect_black_dsc,
+        LVGL_BACKGROUND
+    );
 
     lv_draw_arc_dsc_t arc_dsc;
+
     init_arc_dsc(
         &arc_dsc,
         LVGL_FOREGROUND,
@@ -509,29 +710,34 @@ static void draw_bottom(lv_obj_t *widget,
     );
 
     lv_draw_arc_dsc_t arc_dsc_filled;
+
     init_arc_dsc(
         &arc_dsc_filled,
         LVGL_FOREGROUND,
-        7
+        9
     );
 
     lv_draw_label_dsc_t label_dsc;
+
     init_label_dsc(
         &label_dsc,
         LVGL_FOREGROUND,
-        &lv_font_montserrat_14,
+        &lv_font_montserrat_18,
         LV_TEXT_ALIGN_CENTER
     );
 
     lv_draw_label_dsc_t label_dsc_black;
+
     init_label_dsc(
         &label_dsc_black,
         LVGL_BACKGROUND,
-        &lv_font_montserrat_14,
+        &lv_font_montserrat_18,
         LV_TEXT_ALIGN_CENTER
     );
 
-    /* Clear canvas */
+    /* ------------------------------------------------------------------
+     * Clear
+     * ------------------------------------------------------------------ */
 
     lv_canvas_draw_rect(
         canvas,
@@ -542,87 +748,156 @@ static void draw_bottom(lv_obj_t *widget,
         &rect_black_dsc
     );
 
-    /* ------------------------------------------------------------------
-     * Bluetooth profiles
+    /* ==================================================================
+     * BLE PROFILE INDICATORS
      *
-     * 1   2   3   4   5
+     * Same arrangement as official nice!view:
      *
-     * Only the currently selected profile can be connected/open.
-     * ------------------------------------------------------------------ */
+     *       1       2
+     *
+     *           3
+     *
+     *       4       5
+     *
+     * The canvas is rotated afterwards.
+     * ================================================================== */
 
-    const int profile_y = 14;
+    const int circle_offsets[
+        NICEVIEW_PROFILE_COUNT
+    ][2] = {
 
-    for (int i = 0; i < 5; i++) {
+        {13, 13},
+        {55, 13},
+        {34, 34},
+        {13, 55},
+        {55, 55}
+    };
 
-        const int profile_x =
-            7 + i * 13;
+    for (
+        int i = 0;
+        i < NICEVIEW_PROFILE_COUNT;
+        i++
+    ) {
 
         bool selected =
-            i == state->active_profile_index;
+            i ==
+            state->active_profile_index;
+
+        bool connected =
+            state->profiles_connected[i];
 
         bool bonded =
-            selected &&
-            state->active_profile_bonded;
+            state->profiles_bonded[i];
 
-        if (bonded) {
+        int x =
+            circle_offsets[i][0];
 
-            /* Outer circle */
+        int y =
+            circle_offsets[i][1];
+
+        /* --------------------------------------------------------------
+         * Connected profile:
+         *
+         * solid circle
+         * -------------------------------------------------------------- */
+
+        if (connected) {
 
             lv_canvas_draw_arc(
                 canvas,
-                profile_x,
-                profile_y,
-                6,
+                x,
+                y,
+                13,
                 0,
-                359,
+                360,
                 &arc_dsc
             );
+        }
 
-            /* Filled center for selected profile */
+        /* --------------------------------------------------------------
+         * Bonded but not connected:
+         *
+         * dashed circle
+         * -------------------------------------------------------------- */
 
-            if (selected) {
+        else if (bonded) {
+
+            const int segments = 8;
+
+            const int gap = 20;
+
+            for (
+                int j = 0;
+                j < segments;
+                j++
+            ) {
 
                 lv_canvas_draw_arc(
                     canvas,
-                    profile_x,
-                    profile_y,
-                    4,
-                    0,
-                    359,
-                    &arc_dsc_filled
+                    x,
+                    y,
+                    13,
+                    360.0 / segments * j
+                        + gap / 2.0,
+                    360.0 / segments * (j + 1)
+                        - gap / 2.0,
+                    &arc_dsc
                 );
             }
         }
 
-        char profile_text[2];
+        /* --------------------------------------------------------------
+         * Selected profile:
+         *
+         * filled center
+         * -------------------------------------------------------------- */
+
+        if (selected) {
+
+            lv_canvas_draw_arc(
+                canvas,
+                x,
+                y,
+                9,
+                0,
+                359,
+                &arc_dsc_filled
+            );
+        }
+
+        /* --------------------------------------------------------------
+         * Profile number
+         * -------------------------------------------------------------- */
+
+        char label[2];
 
         snprintf(
-            profile_text,
-            sizeof(profile_text),
+            label,
+            sizeof(label),
             "%d",
             i + 1
         );
 
-        lv_draw_label_dsc_t *profile_label =
-            (selected && bonded)
-                ? &label_dsc_black
-                : &label_dsc;
-
         lv_canvas_draw_text(
             canvas,
-            profile_x - 5,
-            profile_y - 7,
-            10,
-            profile_label,
-            profile_text
+            x - 8,
+            y - 10,
+            16,
+            selected
+                ? &label_dsc_black
+                : &label_dsc,
+            label
         );
     }
 
-    /* ------------------------------------------------------------------
-     * Layer
-     * ------------------------------------------------------------------ */
+    /* ==================================================================
+     * LAYER
+     * ================================================================== */
 
-    if (state->layer_label == NULL) {
+    if (
+        state->layer_label == NULL ||
+        strlen(state->layer_label) == 0
+    ) {
 
         char layer_text[16];
 
@@ -636,7 +911,7 @@ static void draw_bottom(lv_obj_t *widget,
         lv_canvas_draw_text(
             canvas,
             0,
-            40,
+            5,
             CANVAS_SIZE,
             &label_dsc,
             layer_text
@@ -647,20 +922,25 @@ static void draw_bottom(lv_obj_t *widget,
         lv_canvas_draw_text(
             canvas,
             0,
-            40,
+            5,
             CANVAS_SIZE,
             &label_dsc,
             state->layer_label
         );
     }
 
-    /* Rotate canvas for portrait display */
+    /* ------------------------------------------------------------------
+     * Rotate bottom canvas.
+     * ------------------------------------------------------------------ */
 
-    rotate_canvas(canvas, cbuf);
+    rotate_canvas(
+        canvas,
+        cbuf
+    );
 }
 
 /* ==========================================================================
- * BATTERY
+ * BATTERY STATUS
  * ========================================================================== */
 
 static void set_battery_status(
@@ -669,8 +949,10 @@ static void set_battery_status(
 ) {
 
 #if IS_ENABLED(CONFIG_USB_DEVICE_STACK)
+
     widget->state.charging =
         state.usb_present;
+
 #endif
 
     widget->state.battery =
@@ -694,6 +976,7 @@ static void battery_status_update_cb(
         widget,
         node
     ) {
+
         set_battery_status(
             widget,
             state
@@ -701,7 +984,8 @@ static void battery_status_update_cb(
     }
 }
 
-static struct battery_status_state battery_status_get_state(
+static struct battery_status_state
+battery_status_get_state(
     const zmk_event_t *eh
 ) {
 
@@ -711,13 +995,15 @@ static struct battery_status_state battery_status_get_state(
     return (struct battery_status_state) {
 
         .level =
-            (ev != NULL)
+            ev != NULL
                 ? ev->state_of_charge
                 : zmk_battery_state_of_charge(),
 
 #if IS_ENABLED(CONFIG_USB_DEVICE_STACK)
+
         .usb_present =
             zmk_usb_is_powered(),
+
 #endif
     };
 }
@@ -727,7 +1013,7 @@ ZMK_DISPLAY_WIDGET_LISTENER(
     struct battery_status_state,
     battery_status_update_cb,
     battery_status_get_state
-)
+);
 
 ZMK_SUBSCRIPTION(
     widget_battery_status,
@@ -744,7 +1030,7 @@ ZMK_SUBSCRIPTION(
 #endif
 
 /* ==========================================================================
- * OUTPUT / BLUETOOTH
+ * OUTPUT / BLE STATUS
  * ========================================================================== */
 
 static void set_output_status(
@@ -763,6 +1049,27 @@ static void set_output_status(
 
     widget->state.active_profile_bonded =
         state->active_profile_bonded;
+
+    /* --------------------------------------------------------------
+     * Copy all BLE profile states.
+     * -------------------------------------------------------------- */
+
+    for (
+        int i = 0;
+        i < NICEVIEW_PROFILE_COUNT;
+        i++
+    ) {
+
+        widget->state.profiles_connected[i] =
+            state->profiles_connected[i];
+
+        widget->state.profiles_bonded[i] =
+            state->profiles_bonded[i];
+    }
+
+    /* --------------------------------------------------------------
+     * Redraw top and profile section.
+     * -------------------------------------------------------------- */
 
     draw_top(
         widget->obj,
@@ -796,11 +1103,12 @@ static void output_status_update_cb(
     }
 }
 
-static struct output_status_state output_status_get_state(
+static struct output_status_state
+output_status_get_state(
     const zmk_event_t *_eh
 ) {
 
-    return (struct output_status_state) {
+    struct output_status_state state = {
 
         .selected_endpoint =
             zmk_endpoints_selected(),
@@ -814,6 +1122,29 @@ static struct output_status_state output_status_get_state(
         .active_profile_bonded =
             !zmk_ble_active_profile_is_open(),
     };
+
+    /* --------------------------------------------------------------
+     * Query all five BLE profiles.
+     * -------------------------------------------------------------- */
+
+    for (
+        int i = 0;
+        i <
+            MIN(
+                NICEVIEW_PROFILE_COUNT,
+                ZMK_BLE_PROFILE_COUNT
+            );
+        i++
+    ) {
+
+        state.profiles_connected[i] =
+            zmk_ble_profile_is_connected(i);
+
+        state.profiles_bonded[i] =
+            !zmk_ble_profile_is_open(i);
+    }
+
+    return state;
 }
 
 ZMK_DISPLAY_WIDGET_LISTENER(
@@ -821,7 +1152,7 @@ ZMK_DISPLAY_WIDGET_LISTENER(
     struct output_status_state,
     output_status_update_cb,
     output_status_get_state
-)
+);
 
 ZMK_SUBSCRIPTION(
     widget_output_status,
@@ -847,7 +1178,7 @@ ZMK_SUBSCRIPTION(
 #endif
 
 /* ==========================================================================
- * LAYER
+ * LAYER STATUS
  * ========================================================================== */
 
 static void set_layer_status(
@@ -887,11 +1218,12 @@ static void layer_status_update_cb(
     }
 }
 
-static struct layer_status_state layer_status_get_state(
+static struct layer_status_state
+layer_status_get_state(
     const zmk_event_t *eh
 ) {
 
-    uint8_t index =
+    zmk_keymap_layer_index_t index =
         zmk_keymap_highest_layer_active();
 
     return (struct layer_status_state) {
@@ -899,7 +1231,9 @@ static struct layer_status_state layer_status_get_state(
         .index = index,
 
         .label =
-            zmk_keymap_layer_name(index)
+            zmk_keymap_layer_name(
+                zmk_keymap_layer_index_to_id(index)
+            )
     };
 }
 
@@ -908,7 +1242,7 @@ ZMK_DISPLAY_WIDGET_LISTENER(
     struct layer_status_state,
     layer_status_update_cb,
     layer_status_get_state
-)
+);
 
 ZMK_SUBSCRIPTION(
     widget_layer_status,
@@ -936,6 +1270,10 @@ static uint8_t get_current_modifiers(void) {
     return mods;
 }
 
+/* ==========================================================================
+ * MODIFIER WORKER
+ * ========================================================================== */
+
 static void modifier_work_handler(
     struct k_work *work
 ) {
@@ -946,12 +1284,13 @@ static void modifier_work_handler(
         k_uptime_get_32();
 
     /* ------------------------------------------------------------------
-     * Debounce
+     * Debounce / key release
      * ------------------------------------------------------------------ */
 
     if (debounce_check_scheduled) {
 
-        debounce_check_scheduled = false;
+        debounce_check_scheduled =
+            false;
 
         if (
             !keys_active &&
@@ -1047,7 +1386,7 @@ static void modifier_work_handler(
 }
 
 /* ==========================================================================
- * KEY EVENTS
+ * KEY EVENT PROCESSING
  * ========================================================================== */
 
 static void process_keypress_event(
@@ -1084,6 +1423,10 @@ static void process_keypress_event(
             k_uptime_get_32();
     }
 
+    /* ------------------------------------------------------------------
+     * Schedule modifier/key debounce.
+     * ------------------------------------------------------------------ */
+
     k_work_schedule(
         &modifier_work,
         K_MSEC(
@@ -1102,12 +1445,15 @@ static void process_keypress_event(
 }
 
 /* ==========================================================================
- * WPM / KEY EVENT LISTENER
+ * WPM STATUS
  *
- * WPM wird nicht mehr auf dem Display angezeigt.
+ * No WPM graphics are rendered.
  *
- * Es wird intern weiterhin verwendet, um den BongoCat zwischen
- * Casual und Frenzied Animation umzuschalten.
+ * WPM only controls:
+ *
+ *     < 30 WPM  -> CASUAL
+ *     > 30 WPM  -> FURIOUS
+ *
  * ========================================================================== */
 
 static void wpm_status_update_cb(
@@ -1141,12 +1487,36 @@ static void wpm_status_update_cb(
         }
 
         /* --------------------------------------------------------------
-         * Recent WPM
+         * Update internal WPM history
+         * -------------------------------------------------------------- */
+
+        for (
+            int i = 0;
+            i < 9;
+            i++
+        ) {
+
+            widget->state.wpm[i] =
+                widget->state.wpm[i + 1];
+        }
+
+        widget->state.wpm[9] =
+            state.wpm;
+
+        last_wpm_update =
+            current_time;
+
+        /* --------------------------------------------------------------
+         * Calculate recent average.
          * -------------------------------------------------------------- */
 
         int recent_wpm = 0;
 
-        for (int i = 5; i < 10; i++) {
+        for (
+            int i = 5;
+            i < 10;
+            i++
+        ) {
 
             recent_wpm +=
                 widget->state.wpm[i];
@@ -1155,7 +1525,7 @@ static void wpm_status_update_cb(
         recent_wpm /= 5;
 
         /* --------------------------------------------------------------
-         * Animation mode
+         * Enter FURIOUS mode.
          * -------------------------------------------------------------- */
 
         if (recent_wpm > 30) {
@@ -1166,7 +1536,13 @@ static void wpm_status_update_cb(
             leaving_furious =
                 false;
 
-        } else if (
+        }
+
+        /* --------------------------------------------------------------
+         * Leave FURIOUS mode.
+         * -------------------------------------------------------------- */
+
+        else if (
             current_anim_state ==
             ANIM_STATE_FRENZIED
         ) {
@@ -1183,32 +1559,23 @@ static void wpm_status_update_cb(
             last_idle_update =
                 current_time;
         }
-
-        /* --------------------------------------------------------------
-         * Internal WPM history
-         * -------------------------------------------------------------- */
-
-        for (int i = 0; i < 9; i++) {
-
-            widget->state.wpm[i] =
-                widget->state.wpm[i + 1];
-        }
-
-        widget->state.wpm[9] =
-            state.wpm;
-
-        last_wpm_update =
-            current_time;
     }
 }
 
-struct wpm_status_state wpm_status_get_state(
+/* ==========================================================================
+ * WPM STATE GETTER
+ * ========================================================================== */
+
+struct wpm_status_state
+wpm_status_get_state(
     const zmk_event_t *eh
 ) {
 
-    static uint8_t wpm_history[10] = {0};
+    static uint8_t wpm_history[10] =
+        {0};
 
-    static uint8_t current_wpm = 0;
+    static uint8_t current_wpm =
+        0;
 
     const struct zmk_wpm_state_changed *wpm_ev =
         as_zmk_wpm_state_changed(eh);
@@ -1231,7 +1598,11 @@ struct wpm_status_state wpm_status_get_state(
         current_wpm =
             wpm_ev->state;
 
-        for (int i = 0; i < 9; i++) {
+        for (
+            int i = 0;
+            i < 9;
+            i++
+        ) {
 
             wpm_history[i] =
                 wpm_history[i + 1];
@@ -1242,7 +1613,7 @@ struct wpm_status_state wpm_status_get_state(
     }
 
     /* ------------------------------------------------------------------
-     * Position event
+     * Position/key event
      * ------------------------------------------------------------------ */
 
     if (pos_ev != NULL) {
@@ -1260,6 +1631,7 @@ struct wpm_status_state wpm_status_get_state(
             current_wpm,
 
         .wpm_history = {
+
             wpm_history[0],
             wpm_history[1],
             wpm_history[2],
@@ -1291,7 +1663,7 @@ ZMK_DISPLAY_WIDGET_LISTENER(
     struct wpm_status_state,
     wpm_status_update_cb,
     wpm_status_get_state
-)
+);
 
 ZMK_SUBSCRIPTION(
     widget_wpm_status,
@@ -1320,7 +1692,7 @@ static void animation_work_handler(
         false;
 
     /* ------------------------------------------------------------------
-     * Idle animation
+     * Idle animation timer
      * ------------------------------------------------------------------ */
 
     if (
@@ -1333,7 +1705,7 @@ static void animation_work_handler(
             current_time;
 
         /* --------------------------------------------------------------
-         * Exit furious mode after inactivity
+         * Automatic exit from furious mode.
          * -------------------------------------------------------------- */
 
         if (
@@ -1358,12 +1730,14 @@ static void animation_work_handler(
         }
 
         /* --------------------------------------------------------------
-         * Idle breathing
+         * Idle breathing only while no keys are held.
          * -------------------------------------------------------------- */
 
         if (!keys_active) {
 
-            switch (current_idle_state) {
+            switch (
+                current_idle_state
+            ) {
 
             case IDLE_INHALE:
 
@@ -1420,7 +1794,7 @@ static void animation_work_handler(
     }
 
     /* ------------------------------------------------------------------
-     * Redraw BongoCat
+     * Redraw BongoCat.
      * ------------------------------------------------------------------ */
 
     if (needs_redraw) {
@@ -1442,7 +1816,7 @@ static void animation_work_handler(
     }
 
     /* ------------------------------------------------------------------
-     * Schedule next animation check
+     * Schedule next animation update.
      * ------------------------------------------------------------------ */
 
     uint32_t next_check =
@@ -1459,29 +1833,6 @@ static void animation_work_handler(
 
 /* ==========================================================================
  * INITIALIZATION
- *
- * Logical layout:
- *
- *     ┌──────────┬──────────┬──────────┐
- *     │  BOTTOM  │  MIDDLE  │   TOP    │
- *     │  68x68   │  68x68   │  68x68   │
- *     └──────────┴──────────┴──────────┘
- *
- * Physical display:
- *
- *     ┌──────────┐
- *     │   TOP    │
- *     │          │
- *     ├──────────┤
- *     │  MIDDLE  │
- *     │          │
- *     ├──────────┤
- *     │  BOTTOM  │
- *     │          │
- *     └──────────┘
- *
- * Physical size: 68 x 160
- *
  * ========================================================================== */
 
 int zmk_widget_status_init(
@@ -1492,10 +1843,31 @@ int zmk_widget_status_init(
     /*
      * IMPORTANT:
      *
-     * The display is physically mounted portrait.
+     * The nice!view hardware is physically portrait:
      *
-     * The LVGL parent remains 160x68 because each individual
-     * 68x68 canvas is rotated by rotate_canvas().
+     *          68 px
+     *       ┌─────────┐
+     *       │         │
+     *       │         │
+     *       │         │
+     *       │         │
+     *       │         │
+     *       │         │
+     *       │         │
+     *       │         │
+     *       └─────────┘
+     *         160 px
+     *
+     * Internally, however, ZMK uses:
+     *
+     *     [ BOTTOM ][ MIDDLE ][ TOP ]
+     *
+     * as three 68x68 canvases inside a 160x68 parent.
+     *
+     * Each canvas is then rotated.
+     *
+     * This is the same basic architecture used by the official
+     * nice!view widget.
      */
 
     widget->obj =
@@ -1507,15 +1879,14 @@ int zmk_widget_status_init(
         68
     );
 
-    /* ------------------------------------------------------------------
-     * TOP CANVAS
-     *
-     * Right side of logical canvas.
-     * Becomes top section after rotation.
-     * ------------------------------------------------------------------ */
+    /* ==================================================================
+     * TOP
+     * ================================================================== */
 
     lv_obj_t *top =
-        lv_canvas_create(widget->obj);
+        lv_canvas_create(
+            widget->obj
+        );
 
     lv_obj_align(
         top,
@@ -1529,18 +1900,17 @@ int zmk_widget_status_init(
         widget->cbuf,
         CANVAS_SIZE,
         CANVAS_SIZE,
-        LV_IMG_CF_TRUE_COLOR
+        CANVAS_COLOR_FORMAT
     );
 
-    /* ------------------------------------------------------------------
-     * MIDDLE CANVAS
-     *
-     * Center of logical canvas.
-     * Becomes middle section after rotation.
-     * ------------------------------------------------------------------ */
+    /* ==================================================================
+     * MIDDLE
+     * ================================================================== */
 
     lv_obj_t *middle =
-        lv_canvas_create(widget->obj);
+        lv_canvas_create(
+            widget->obj
+        );
 
     lv_obj_align(
         middle,
@@ -1554,18 +1924,17 @@ int zmk_widget_status_init(
         widget->cbuf2,
         CANVAS_SIZE,
         CANVAS_SIZE,
-        LV_IMG_CF_TRUE_COLOR
+        CANVAS_COLOR_FORMAT
     );
 
-    /* ------------------------------------------------------------------
-     * BOTTOM CANVAS
-     *
-     * Left side of logical canvas.
-     * Becomes bottom section after rotation.
-     * ------------------------------------------------------------------ */
+    /* ==================================================================
+     * BOTTOM
+     * ================================================================== */
 
     lv_obj_t *bottom =
-        lv_canvas_create(widget->obj);
+        lv_canvas_create(
+            widget->obj
+        );
 
     lv_obj_align(
         bottom,
@@ -1579,21 +1948,21 @@ int zmk_widget_status_init(
         widget->cbuf3,
         CANVAS_SIZE,
         CANVAS_SIZE,
-        LV_IMG_CF_TRUE_COLOR
+        CANVAS_COLOR_FORMAT
     );
 
-    /* ------------------------------------------------------------------
-     * Register widget
-     * ------------------------------------------------------------------ */
+    /* ==================================================================
+     * REGISTER WIDGET
+     * ================================================================== */
 
     sys_slist_append(
         &widgets,
         &widget->node
     );
 
-    /* ------------------------------------------------------------------
-     * Initialize listeners
-     * ------------------------------------------------------------------ */
+    /* ==================================================================
+     * INITIALIZE LISTENERS
+     * ================================================================== */
 
     widget_battery_status_init();
 
@@ -1603,9 +1972,9 @@ int zmk_widget_status_init(
 
     widget_wpm_status_init();
 
-    /* ------------------------------------------------------------------
-     * Initialize animation worker
-     * ------------------------------------------------------------------ */
+    /* ==================================================================
+     * INITIALIZE WORKERS
+     * ================================================================== */
 
     k_work_init_delayable(
         &animation_work,
@@ -1624,9 +1993,9 @@ int zmk_widget_status_init(
         )
     );
 
-    /* ------------------------------------------------------------------
-     * Initial modifier state
-     * ------------------------------------------------------------------ */
+    /* ==================================================================
+     * INITIAL MODIFIER STATE
+     * ================================================================== */
 
     for (
         int i = 0;
@@ -1641,9 +2010,9 @@ int zmk_widget_status_init(
     widget->state.modifiers =
         0;
 
-    /* ------------------------------------------------------------------
-     * Initial draw
-     * ------------------------------------------------------------------ */
+    /* ==================================================================
+     * INITIAL DRAW
+     * ================================================================== */
 
     draw_top(
         widget->obj,
