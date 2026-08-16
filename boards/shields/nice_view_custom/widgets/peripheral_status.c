@@ -27,7 +27,7 @@ LV_IMG_DECLARE(balloon);
 LV_IMG_DECLARE(jelllyfish);
 LV_IMG_DECLARE(seahorse);
 LV_IMG_DECLARE(char_pikachu);
-LV_IMG_DECLARE(img_1_fc_union_berlin_logo_svg);
+LV_IMG_DECLARE(union_logo);
 
 static sys_slist_t widgets = SYS_SLIST_STATIC_INIT(&widgets);
 
@@ -128,10 +128,10 @@ int zmk_widget_status_init(struct zmk_widget_status *widget, lv_obj_t *parent) {
         &jelllyfish,
         &seahorse,
         &char_pikachu,
-        &img_1_fc_union_berlin_logo_svg
+        &union_logo
     };
 
-    lv_img_set_src(art, &img_1_fc_union_berlin_logo_svg);
+    lv_img_set_src(art, &union_logo);
     
     /*
      * 68px status + 92px artwork = 160px total
