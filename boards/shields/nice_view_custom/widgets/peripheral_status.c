@@ -115,12 +115,32 @@ int zmk_widget_status_init(struct zmk_widget_status *widget, lv_obj_t *parent) {
     lv_obj_align(top, LV_ALIGN_TOP_RIGHT, 0, 0);
     lv_canvas_set_buffer(top, widget->cbuf, CANVAS_SIZE, CANVAS_SIZE, LV_IMG_CF_TRUE_COLOR);
 
+    //lv_obj_t *art = lv_img_create(widget->obj);
+    //uint32_t random = sys_rand32_get() % 3;  // Get random number between 0-2
+    //const lv_img_dsc_t* images[] = {&balloon, &jelllyfish, &seahorse};
+    //lv_img_set_src(art, images[random]);
+    //lv_obj_align(art, LV_ALIGN_TOP_LEFT, 0, 0);
+
     lv_obj_t *art = lv_img_create(widget->obj);
-    uint32_t random = sys_rand32_get() % 3;  // Get random number between 0-2
-    const lv_img_dsc_t* images[] = {&balloon, &jelllyfish, &seahorse};
+    uint32_t random = sys_rand32_get() % 3;
+    
+    const lv_img_dsc_t *images[] = {
+        &balloon,
+        &jelllyfish,
+        &seahorse
+    };
+    
     lv_img_set_src(art, images[random]);
+    
+    /*
+     * The physical Nice!View is mounted upside down.
+     * Rotate the artwork independently from the status canvas.
+     */
+    lv_img_set_angle(art, 1800);
+    
     lv_obj_align(art, LV_ALIGN_TOP_LEFT, 0, 0);
 
+    
     sys_slist_append(&widgets, &widget->node);
     widget_battery_status_init();
     widget_peripheral_status_init();
