@@ -132,7 +132,7 @@ int zmk_widget_status_init(struct zmk_widget_status *widget, lv_obj_t *parent) {
     /*
      * 68px status + 92px artwork = 160px total
      */
-    lv_obj_align(art, LV_ALIGN_TOP_LEFT, 68, 0);
+    lv_obj_align(art, LV_ALIGN_TOP_LEFT, 20, 0);
 
     sys_slist_append(&widgets, &widget->node);
 
