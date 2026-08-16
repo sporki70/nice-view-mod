@@ -129,7 +129,7 @@ int zmk_widget_status_init(struct zmk_widget_status *widget, lv_obj_t *parent) {
         &CHAR_PICKACHU
     };
 
-    lv_img_set_src(art, images[random]);
+    lv_img_set_src(art, &CHAR_PICKACHU);
     
     /*
      * 68px status + 92px artwork = 160px total
