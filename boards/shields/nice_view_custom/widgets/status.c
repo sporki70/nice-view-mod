@@ -12,6 +12,8 @@
 #include <zephyr/logging/log.h>
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
+#include <lvgl.h>
+
 #include <zmk/battery.h>
 #include <zmk/display.h>
 #include "status.h"
@@ -36,8 +38,6 @@ LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 #include <stdio.h>
 #include <inttypes.h>
 
-#include <dt-bindings/zmk/modifiers.h>
-
 #include "bongocatart.h"
 
 
@@ -61,11 +61,12 @@ LV_IMG_DECLARE(win_icon);
  * Widget list
  * ========================================================================== */
 
-static sys_slist_t widgets = SYS_SLIST_STATIC_INIT(&widgets);
+static sys_slist_t widgets =
+    SYS_SLIST_STATIC_INIT(&widgets);
 
 
 /* ==========================================================================
- * Output status
+ * Output state
  * ========================================================================== */
 
 struct output_status_state {
@@ -77,7 +78,7 @@ struct output_status_state {
 
 
 /* ==========================================================================
- * Layer status
+ * Layer state
  * ========================================================================== */
 
 struct layer_status_state {
@@ -87,21 +88,21 @@ struct layer_status_state {
 
 
 /* ==========================================================================
- * WPM status
+ * WPM state
  *
  * WPM wird NICHT angezeigt.
- * Es wird ausschließlich für die Bongo-Animation verwendet.
+ * Es steuert ausschließlich die Bongo-Animation.
  * ========================================================================== */
 
 struct wpm_status_state {
     uint8_t wpm;
-    bool key_pressed;
     bool is_key_event;
+    bool key_pressed;
 };
 
 
 /* ==========================================================================
- * Bongo animation
+ * Bongo animation state
  * ========================================================================== */
 
 enum anim_state {
@@ -109,7 +110,8 @@ enum anim_state {
     ANIM_STATE_FRENZIED
 };
 
-static enum anim_state current_anim_state = ANIM_STATE_CASUAL;
+static enum anim_state current_anim_state =
+    ANIM_STATE_CASUAL;
 
 
 enum idle_anim_state {
@@ -119,7 +121,8 @@ enum idle_anim_state {
     IDLE_REST2
 };
 
-static enum idle_anim_state current_idle_state = IDLE_INHALE;
+static enum idle_anim_state current_idle_state =
+    IDLE_INHALE;
 
 
 /* ==========================================================================
@@ -128,11 +131,13 @@ static enum idle_anim_state current_idle_state = IDLE_INHALE;
 
 static uint32_t last_idle_update = 0;
 
-static const uint32_t IDLE_ANIMATION_INTERVAL = 750;
+static const uint32_t IDLE_ANIMATION_INTERVAL =
+    750;
 
 static uint32_t last_key_event = 0;
 
-static const uint32_t KEY_DEBOUNCE_INTERVAL = 20;
+static const uint32_t KEY_DEBOUNCE_INTERVAL =
+    20;
 
 
 /* ==========================================================================
@@ -147,24 +152,23 @@ static uint8_t active_keys = 0;
 
 
 /* ==========================================================================
- * Animation frame state
+ * Bongo frame state
  * ========================================================================== */
 
 static bool use_first_frame = true;
 
-static const lv_img_dsc_t *last_active_frame = &bongo_resting;
+static const lv_img_dsc_t *last_active_frame =
+    &bongo_resting;
 
 
 /* ==========================================================================
- * Animation work
+ * Work
  * ========================================================================== */
 
 static struct k_work_delayable animation_work;
 static struct k_work_delayable modifier_work;
 
-static bool modifier_check_scheduled = false;
-
-static const uint32_t MODIFIER_CHECK_INTERVAL = 20;
+static bool modifier_work_scheduled = false;
 
 
 /* ==========================================================================
@@ -179,16 +183,16 @@ static bool leaving_furious = false;
 
 
 /* ==========================================================================
- * Random number
+ * Random breathing variation
  * ========================================================================== */
 
 static int32_t get_random_adjustment(void) {
 
-    static bool seed_initialized = false;
+    static bool initialized = false;
 
-    if (!seed_initialized) {
+    if (!initialized) {
         random_seed ^= k_uptime_get_32();
-        seed_initialized = true;
+        initialized = true;
     }
 
     random_seed =
@@ -199,36 +203,71 @@ static int32_t get_random_adjustment(void) {
 
 
 /* ==========================================================================
- * Current modifier state
+ * Current modifiers
  * ========================================================================== */
 
 static uint8_t get_current_modifiers(void) {
-
     return zmk_hid_get_explicit_mods();
 }
 
 
 /* ==========================================================================
- * Bongo frame
+ * Set Bongo state according to WPM
  * ========================================================================== */
 
-static const lv_img_dsc_t *get_current_bongo_frame(void) {
+static void update_bongo_from_wpm(uint8_t wpm) {
 
-    /* ---------------------------------------------------------------
-     * Furious mode
-     * --------------------------------------------------------------- */
+    if (wpm > 30) {
+
+        current_anim_state =
+            ANIM_STATE_FRENZIED;
+
+        leaving_furious = false;
+
+        return;
+    }
+
+
+    if (current_anim_state == ANIM_STATE_FRENZIED) {
+
+        current_anim_state =
+            ANIM_STATE_CASUAL;
+
+        leaving_furious = true;
+
+        current_idle_state =
+            IDLE_EXHALE;
+
+        last_idle_update =
+            k_uptime_get_32();
+    }
+}
+
+
+/* ==========================================================================
+ * Get current Bongo frame
+ * ========================================================================== */
+
+static const lv_img_dsc_t *get_bongo_frame(void) {
+
+    /* ----------------------------------------------------------------------
+     * Furious
+     * ---------------------------------------------------------------------- */
 
     if (current_anim_state == ANIM_STATE_FRENZIED) {
 
         if (key_pressed || key_released) {
 
             if (use_first_frame) {
-                last_active_frame = &bongo_furiousup;
+                last_active_frame =
+                    &bongo_furiousup;
             } else {
-                last_active_frame = &bongo_furiousdown;
+                last_active_frame =
+                    &bongo_furiousdown;
             }
 
-            use_first_frame = !use_first_frame;
+            use_first_frame =
+                !use_first_frame;
 
             return last_active_frame;
         }
@@ -239,21 +278,24 @@ static const lv_img_dsc_t *get_current_bongo_frame(void) {
     }
 
 
-    /* ---------------------------------------------------------------
-     * Casual mode
-     * --------------------------------------------------------------- */
+    /* ----------------------------------------------------------------------
+     * Casual
+     * ---------------------------------------------------------------------- */
 
     else {
 
         if (key_pressed) {
 
             if (use_first_frame) {
-                last_active_frame = &bongo_casualright;
+                last_active_frame =
+                    &bongo_casualright;
             } else {
-                last_active_frame = &bongo_casualleft;
+                last_active_frame =
+                    &bongo_casualleft;
             }
 
-            use_first_frame = !use_first_frame;
+            use_first_frame =
+                !use_first_frame;
 
             return last_active_frame;
         }
@@ -264,9 +306,9 @@ static const lv_img_dsc_t *get_current_bongo_frame(void) {
     }
 
 
-    /* ---------------------------------------------------------------
-     * Idle animation
-     * --------------------------------------------------------------- */
+    /* ----------------------------------------------------------------------
+     * Idle / breathing
+     * ---------------------------------------------------------------------- */
 
     switch (current_idle_state) {
 
@@ -287,63 +329,109 @@ static const lv_img_dsc_t *get_current_bongo_frame(void) {
 
 
 /* ==========================================================================
- * Update Bongo based on WPM
+ * Draw Bongo
  * ========================================================================== */
 
-static void update_animation_from_wpm(uint8_t wpm) {
+static void draw_bongo(
+    lv_obj_t *canvas,
+    lv_draw_rect_dsc_t *background
+) {
 
     /*
-     * More than 30 WPM = furious.
+     * Bongo-Bereich löschen.
+     *
+     * Oben bleiben Akku / Verbindung.
+     * Unten bleiben Modifier / Profil / Layer.
      */
 
-    if (wpm > 30) {
+    lv_canvas_draw_rect(
+        canvas,
+        0,
+        10,
+        CANVAS_SIZE,
+        37,
+        background
+    );
 
-        current_anim_state =
-            ANIM_STATE_FRENZIED;
 
-        leaving_furious = false;
+    lv_draw_img_dsc_t img_dsc;
 
-        return;
-    }
+    lv_draw_img_dsc_init(
+        &img_dsc
+    );
+
+
+    const lv_img_dsc_t *frame =
+        get_bongo_frame();
 
 
     /*
-     * Going from furious back to casual.
+     * Bildgröße aus LVGL lesen.
      */
 
-    if (current_anim_state == ANIM_STATE_FRENZIED) {
+    int img_w =
+        frame->header.w;
 
-        current_anim_state =
-            ANIM_STATE_CASUAL;
+    int img_h =
+        frame->header.h;
 
-        leaving_furious = true;
 
-        current_idle_state =
-            IDLE_EXHALE;
+    /*
+     * Horizontal zentrieren.
+     */
 
-        last_idle_update =
-            k_uptime_get_32();
-    }
+    int x =
+        (CANVAS_SIZE - img_w) / 2;
+
+
+    /*
+     * Bongo oben im mittleren Bereich.
+     */
+
+    int y = 10;
+
+
+    /*
+     * Falls das Bild größer als der verfügbare Bereich ist,
+     * wird es von LVGL am Canvas abgeschnitten.
+     *
+     * Dadurch können auch deine bisherigen 68px-Bongo-Bilder
+     * weiterverwendet werden.
+     */
+
+    ARG_UNUSED(img_h);
+
+
+    lv_canvas_draw_img(
+        canvas,
+        x,
+        y,
+        frame,
+        &img_dsc
+    );
 }
 
 
 /* ==========================================================================
- * Draw complete 68x68 status area
+ * Draw complete left display
  *
- * Layout:
+ * 68 x 68
  *
- *   ┌────────────────────────────────────┐
- *   │ 🔋                         WiFi    │
- *   │                                    │
- *   │             BONGO CAT              │
- *   │                                    │
- *   │  Ctrl  Shift  Alt  Win             │
- *   │                           ●1  L0    │
- *   └────────────────────────────────────┘
+ * ┌────────────────────────────────────┐
+ * │ Akku                         WiFi  │
+ * │                                    │
+ * │            BONGO CAT               │
+ * │                                    │
+ * │ Ctrl   Shift   Alt   Win            │
+ * │                              ● 1   │
+ * │                              L 0   │
+ * └────────────────────────────────────┘
  *
  * ========================================================================== */
 
-static void draw_status(struct zmk_widget_status *widget) {
+static void draw_status(
+    struct zmk_widget_status *widget
+) {
 
     lv_obj_t *canvas =
         lv_obj_get_child(widget->obj, 0);
@@ -353,12 +441,13 @@ static void draw_status(struct zmk_widget_status *widget) {
      * Background
      * ---------------------------------------------------------------------- */
 
-    lv_draw_rect_dsc_t rect_black_dsc;
+    lv_draw_rect_dsc_t background;
 
     init_rect_dsc(
-        &rect_black_dsc,
+        &background,
         LVGL_BACKGROUND
     );
+
 
     lv_canvas_draw_rect(
         canvas,
@@ -366,36 +455,26 @@ static void draw_status(struct zmk_widget_status *widget) {
         0,
         CANVAS_SIZE,
         CANVAS_SIZE,
-        &rect_black_dsc
+        &background
     );
 
 
     /* ----------------------------------------------------------------------
-     * Text styles
+     * Text style
      * ---------------------------------------------------------------------- */
 
-    lv_draw_label_dsc_t label_dsc;
+    lv_draw_label_dsc_t label;
 
     init_label_dsc(
-        &label_dsc,
+        &label,
         LVGL_FOREGROUND,
         &lv_font_montserrat_14,
         LV_TEXT_ALIGN_CENTER
     );
 
 
-    lv_draw_label_dsc_t profile_label_dsc;
-
-    init_label_dsc(
-        &profile_label_dsc,
-        LVGL_BACKGROUND,
-        &lv_font_montserrat_14,
-        LV_TEXT_ALIGN_CENTER
-    );
-
-
     /* ----------------------------------------------------------------------
-     * 1. BATTERY
+     * 1. Battery
      * ---------------------------------------------------------------------- */
 
     draw_battery(
@@ -405,12 +484,18 @@ static void draw_status(struct zmk_widget_status *widget) {
 
 
     /* ----------------------------------------------------------------------
-     * 2. USB / WIFI
+     * 2. USB / Bluetooth connection
      * ---------------------------------------------------------------------- */
+
+#if !IS_ENABLED(CONFIG_ZMK_SPLIT) || \
+    IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
 
     char output_text[10] = {};
 
-    switch (widget->state.selected_endpoint.transport) {
+
+    switch (
+        widget->state.selected_endpoint.transport
+    ) {
 
     case ZMK_TRANSPORT_USB:
 
@@ -458,117 +543,75 @@ static void draw_status(struct zmk_widget_status *widget) {
 
 
     /*
-     * WiFi / USB oben rechts.
+     * Verbindung oben rechts.
      */
 
     lv_canvas_draw_text(
         canvas,
         45,
         1,
-        20,
-        &label_dsc,
+        21,
+        &label,
         output_text
     );
 
+#endif
+
 
     /* ----------------------------------------------------------------------
-     * 3. BONGO CAT
+     * 3. Bongo Cat
      * ---------------------------------------------------------------------- */
 
-    lv_draw_img_dsc_t img_dsc;
-
-    lv_draw_img_dsc_init(
-        &img_dsc
-    );
-
-
-    const lv_img_dsc_t *current_frame =
-        get_current_bongo_frame();
-
-
-    /*
-     * Bongo-Bereich löschen.
-     *
-     * Dadurch bleiben keine Pixel des vorherigen Frames stehen.
-     */
-
-    lv_canvas_draw_rect(
+    draw_bongo(
         canvas,
-        0,
-        12,
-        CANVAS_SIZE,
-        34,
-        &rect_black_dsc
-    );
-
-
-    /*
-     * Bongo zeichnen.
-     *
-     * Die Bongo-Bilder aus deinem bisherigen Code wurden
-     * bereits bei y=28 in einem 68x68 Canvas gezeichnet.
-     *
-     * Hier sitzt der Bongo weiter oben, damit unten Platz
-     * für Modifier / Profil / Layer bleibt.
-     */
-
-    lv_canvas_draw_img(
-        canvas,
-        0,
-        12,
-        current_frame,
-        &img_dsc
+        &background
     );
 
 
     /* ----------------------------------------------------------------------
-     * 4. MODIFIERS
+     * 4. Modifier
      * ---------------------------------------------------------------------- */
 
     /*
-     * Deine vorhandene draw_modifiers()-Implementierung bleibt erhalten.
+     * Deine vorhandene Modifier-Zeichenfunktion wird weiterverwendet.
      *
-     * y=45 ist bewusst gewählt:
-     *
-     *   Bongo       ~12-45
-     *   Modifier    ~45-57
-     *   Profile     ~58-68
+     * Dadurch bleiben deine vorhandenen Logos und deren Aktivierungs-
+     * Logik erhalten.
      */
 
     draw_modifiers(
         canvas,
         0,
-        45
+        47
     );
 
 
     /* ----------------------------------------------------------------------
-     * 5. BLUETOOTH PROFILE
+     * 5. Bluetooth profile
      * ---------------------------------------------------------------------- */
 
-    lv_draw_arc_dsc_t arc_dsc;
+#if !IS_ENABLED(CONFIG_ZMK_SPLIT) || \
+    IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
+
+    lv_draw_arc_dsc_t arc;
 
     init_arc_dsc(
-        &arc_dsc,
+        &arc,
         LVGL_FOREGROUND,
         2
     );
 
 
-    lv_draw_arc_dsc_t arc_dsc_filled;
+    lv_draw_arc_dsc_t arc_filled;
 
     init_arc_dsc(
-        &arc_dsc_filled,
+        &arc_filled,
         LVGL_FOREGROUND,
-        6
+        5
     );
 
 
-    /*
-     * Kleiner Profil-Kreis unten rechts.
-     */
-
-    const int profile_x = 48;
+    const int profile_x = 49;
     const int profile_y = 61;
 
 
@@ -579,7 +622,7 @@ static void draw_status(struct zmk_widget_status *widget) {
         7,
         0,
         360,
-        &arc_dsc
+        &arc
     );
 
 
@@ -590,11 +633,22 @@ static void draw_status(struct zmk_widget_status *widget) {
         4,
         0,
         359,
-        &arc_dsc_filled
+        &arc_filled
+    );
+
+
+    lv_draw_label_dsc_t profile_label;
+
+    init_label_dsc(
+        &profile_label,
+        LVGL_BACKGROUND,
+        &lv_font_montserrat_14,
+        LV_TEXT_ALIGN_CENTER
     );
 
 
     char profile_text[2] = {};
+
 
     snprintf(
         profile_text,
@@ -611,28 +665,24 @@ static void draw_status(struct zmk_widget_status *widget) {
         profile_x - 5,
         profile_y - 7,
         10,
-        &profile_label_dsc,
+        &profile_label,
         profile_text
     );
 
+#endif
+
 
     /* ----------------------------------------------------------------------
-     * 6. LAYER
+     * 6. Layer
      * ---------------------------------------------------------------------- */
+
+#if !IS_ENABLED(CONFIG_ZMK_SPLIT) || \
+    IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
 
     char layer_text[16] = {};
 
 
-    if (widget->state.layer_label == NULL) {
-
-        snprintf(
-            layer_text,
-            sizeof(layer_text),
-            "L%" PRIu8,
-            widget->state.layer_index
-        );
-
-    } else {
+    if (widget->state.layer_label != NULL) {
 
         snprintf(
             layer_text,
@@ -640,21 +690,32 @@ static void draw_status(struct zmk_widget_status *widget) {
             "%s",
             widget->state.layer_label
         );
+
+    } else {
+
+        snprintf(
+            layer_text,
+            sizeof(layer_text),
+            "L%" PRIu8,
+            widget->state.layer_index
+        );
     }
 
 
     /*
-     * Layer ganz unten rechts.
+     * Layer unten rechts.
      */
 
     lv_canvas_draw_text(
         canvas,
-        54,
-        54,
-        14,
-        &label_dsc,
+        56,
+        55,
+        12,
+        &label,
         layer_text
     );
+
+#endif
 
 
     /* ----------------------------------------------------------------------
@@ -687,6 +748,7 @@ static void set_battery_status(
     widget->state.battery =
         state.level;
 
+
     draw_status(widget);
 }
 
@@ -696,6 +758,7 @@ static void battery_status_update_cb(
 ) {
 
     struct zmk_widget_status *widget;
+
 
     SYS_SLIST_FOR_EACH_CONTAINER(
         &widgets,
@@ -711,7 +774,8 @@ static void battery_status_update_cb(
 }
 
 
-static struct battery_status_state battery_status_get_state(
+static struct battery_status_state
+battery_status_get_state(
     const zmk_event_t *eh
 ) {
 
@@ -722,7 +786,7 @@ static struct battery_status_state battery_status_get_state(
     return (struct battery_status_state) {
 
         .level =
-            (ev != NULL)
+            ev != NULL
                 ? ev->state_of_charge
                 : zmk_battery_state_of_charge(),
 
@@ -769,6 +833,9 @@ static void set_output_status(
     const struct output_status_state *state
 ) {
 
+#if !IS_ENABLED(CONFIG_ZMK_SPLIT) || \
+    IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
+
     widget->state.selected_endpoint =
         state->selected_endpoint;
 
@@ -781,6 +848,9 @@ static void set_output_status(
     widget->state.active_profile_bonded =
         state->active_profile_bonded;
 
+#endif
+
+
     draw_status(widget);
 }
 
@@ -790,6 +860,7 @@ static void output_status_update_cb(
 ) {
 
     struct zmk_widget_status *widget;
+
 
     SYS_SLIST_FOR_EACH_CONTAINER(
         &widgets,
@@ -805,7 +876,8 @@ static void output_status_update_cb(
 }
 
 
-static struct output_status_state output_status_get_state(
+static struct output_status_state
+output_status_get_state(
     const zmk_event_t *eh
 ) {
 
@@ -869,11 +941,17 @@ static void set_layer_status(
     struct layer_status_state state
 ) {
 
+#if !IS_ENABLED(CONFIG_ZMK_SPLIT) || \
+    IS_ENABLED(CONFIG_ZMK_SPLIT_ROLE_CENTRAL)
+
     widget->state.layer_index =
         state.index;
 
     widget->state.layer_label =
         state.label;
+
+#endif
+
 
     draw_status(widget);
 }
@@ -884,6 +962,7 @@ static void layer_status_update_cb(
 ) {
 
     struct zmk_widget_status *widget;
+
 
     SYS_SLIST_FOR_EACH_CONTAINER(
         &widgets,
@@ -899,7 +978,8 @@ static void layer_status_update_cb(
 }
 
 
-static struct layer_status_state layer_status_get_state(
+static struct layer_status_state
+layer_status_get_state(
     const zmk_event_t *eh
 ) {
 
@@ -932,24 +1012,24 @@ ZMK_SUBSCRIPTION(
 
 
 /* ==========================================================================
- * Key events
+ * Keypress handling
  * ========================================================================== */
 
 static void process_keypress_event(
-    bool is_pressed
+    bool pressed
 ) {
 
     key_pressed =
-        is_pressed;
+        pressed;
 
     key_released =
-        !is_pressed;
+        !pressed;
 
     last_key_event =
         k_uptime_get_32();
 
 
-    if (is_pressed) {
+    if (pressed) {
 
         if (active_keys < UINT8_MAX) {
             active_keys++;
@@ -969,16 +1049,16 @@ static void process_keypress_event(
 
 
     /*
-     * Modifier update anstoßen.
+     * Modifier regelmäßig aktualisieren.
      */
 
-    if (!modifier_check_scheduled) {
+    if (!modifier_work_scheduled) {
 
-        modifier_check_scheduled = true;
+        modifier_work_scheduled = true;
 
         k_work_schedule(
             &modifier_work,
-            K_MSEC(MODIFIER_CHECK_INTERVAL)
+            K_MSEC(20)
         );
     }
 
@@ -988,6 +1068,7 @@ static void process_keypress_event(
      */
 
     struct zmk_widget_status *widget;
+
 
     SYS_SLIST_FOR_EACH_CONTAINER(
         &widgets,
@@ -1001,7 +1082,7 @@ static void process_keypress_event(
 
 
 /* ==========================================================================
- * Modifier work
+ * Modifier worker
  * ========================================================================== */
 
 static void modifier_work_handler(
@@ -1010,7 +1091,9 @@ static void modifier_work_handler(
 
     ARG_UNUSED(work);
 
-    modifier_check_scheduled = false;
+
+    modifier_work_scheduled =
+        false;
 
 
     uint8_t mods =
@@ -1018,6 +1101,7 @@ static void modifier_work_handler(
 
 
     struct zmk_widget_status *widget;
+
 
     SYS_SLIST_FOR_EACH_CONTAINER(
         &widgets,
@@ -1034,7 +1118,8 @@ static void modifier_work_handler(
             for (int i = 0; i < NUM_SYMBOLS; i++) {
 
                 modifier_symbols[i]->is_active =
-                    (mods & modifier_symbols[i]->modifier) != 0;
+                    (mods &
+                     modifier_symbols[i]->modifier) != 0;
             }
 
 
@@ -1044,29 +1129,28 @@ static void modifier_work_handler(
 
 
     /*
-     * Solange Tasten gehalten werden, Modifier weiter prüfen.
+     * Solange Tasten gehalten werden, weiter prüfen.
      */
 
     if (keys_active) {
 
-        if (!modifier_check_scheduled) {
+        modifier_work_scheduled =
+            true;
 
-            modifier_check_scheduled = true;
-
-            k_work_schedule(
-                &modifier_work,
-                K_MSEC(MODIFIER_CHECK_INTERVAL)
-            );
-        }
+        k_work_schedule(
+            &modifier_work,
+            K_MSEC(20)
+        );
     }
 }
 
 
 /* ==========================================================================
- * WPM state
+ * WPM event
  * ========================================================================== */
 
-static struct wpm_status_state wpm_status_get_state(
+static struct wpm_status_state
+wpm_status_get_state(
     const zmk_event_t *eh
 ) {
 
@@ -1081,33 +1165,30 @@ static struct wpm_status_state wpm_status_get_state(
 
 
     bool is_key_event = false;
-    bool key_is_pressed = false;
+    bool pressed = false;
 
 
-    /*
-     * WPM event
-     */
+    /* WPM */
 
     if (wpm_ev != NULL) {
 
         current_wpm =
             wpm_ev->state;
 
-        update_animation_from_wpm(
+        update_bongo_from_wpm(
             current_wpm
         );
     }
 
 
-    /*
-     * Key event
-     */
+    /* Key */
 
     if (pos_ev != NULL) {
 
-        is_key_event = true;
+        is_key_event =
+            true;
 
-        key_is_pressed =
+        pressed =
             pos_ev->state > 0;
     }
 
@@ -1117,17 +1198,17 @@ static struct wpm_status_state wpm_status_get_state(
         .wpm =
             current_wpm,
 
-        .key_pressed =
-            key_is_pressed,
-
         .is_key_event =
             is_key_event,
+
+        .key_pressed =
+            pressed,
     };
 }
 
 
 /* ==========================================================================
- * WPM callback
+ * WPM update
  * ========================================================================== */
 
 static void wpm_status_update_cb(
@@ -1136,15 +1217,12 @@ static void wpm_status_update_cb(
 
     struct zmk_widget_status *widget;
 
+
     SYS_SLIST_FOR_EACH_CONTAINER(
         &widgets,
         widget,
         node
     ) {
-
-        /*
-         * Key event.
-         */
 
         if (state.is_key_event) {
 
@@ -1155,24 +1233,16 @@ static void wpm_status_update_cb(
         } else {
 
             /*
-             * WPM event.
+             * WPM wird NICHT angezeigt.
              *
-             * WPM wird NICHT gezeichnet.
-             * Nur Bongo-Zustand wird aktualisiert.
+             * Nur Bongo neu zeichnen.
              */
-
-            widget->state.wpm[9] =
-                state.wpm;
 
             draw_status(widget);
         }
     }
 }
 
-
-/* ==========================================================================
- * WPM listener
- * ========================================================================== */
 
 ZMK_DISPLAY_WIDGET_LISTENER(
     widget_wpm_status,
@@ -1195,7 +1265,7 @@ ZMK_SUBSCRIPTION(
 
 
 /* ==========================================================================
- * Animation work
+ * Animation worker
  * ========================================================================== */
 
 static void animation_work_handler(
@@ -1209,19 +1279,19 @@ static void animation_work_handler(
         k_uptime_get_32();
 
 
-    /*
-     * Idle animation only when no key is held.
-     */
-
     uint32_t interval =
         IDLE_ANIMATION_INTERVAL +
         breathing_interval_adjustment;
 
 
-    if (interval < 100) {
-        interval = 100;
+    if (interval < 200) {
+        interval = 200;
     }
 
+
+    /*
+     * Idle animation nur wenn keine Taste gehalten wird.
+     */
 
     if (
         !keys_active &&
@@ -1278,6 +1348,7 @@ static void animation_work_handler(
 
         struct zmk_widget_status *widget;
 
+
         SYS_SLIST_FOR_EACH_CONTAINER(
             &widgets,
             widget,
@@ -1290,7 +1361,15 @@ static void animation_work_handler(
 
 
     /*
-     * Worker alle 100 ms erneut ausführen.
+     * Key flags nach dem Zeichnen zurücksetzen.
+     */
+
+    key_pressed = false;
+    key_released = false;
+
+
+    /*
+     * Worker weiterlaufen lassen.
      */
 
     k_work_schedule(
@@ -1310,29 +1389,29 @@ int zmk_widget_status_init(
 ) {
 
     /*
-     * ------------------------------------------------------------
-     * Gesamt-Widget
-     *
+     * ================================================================
      * WICHTIG:
-     * Das Display bleibt 160x68.
-     * Wir verwenden davon links 68px.
-     * ------------------------------------------------------------
+     *
+     * Dies ist ein einzelnes 68x68 Display.
+     *
+     * Kein 160x68!
+     * Kein Artwork!
+     * ================================================================
      */
 
     widget->obj =
         lv_obj_create(parent);
 
+
     lv_obj_set_size(
         widget->obj,
-        160,
+        68,
         68
     );
 
 
     /*
-     * ------------------------------------------------------------
-     * EIN Canvas für die linke 68px-Hälfte.
-     * ------------------------------------------------------------
+     * Canvas
      */
 
     lv_obj_t *canvas =
@@ -1357,9 +1436,7 @@ int zmk_widget_status_init(
 
 
     /*
-     * ------------------------------------------------------------
      * Widget registrieren.
-     * ------------------------------------------------------------
      */
 
     sys_slist_append(
@@ -1369,9 +1446,7 @@ int zmk_widget_status_init(
 
 
     /*
-     * ------------------------------------------------------------
      * Listener initialisieren.
-     * ------------------------------------------------------------
      */
 
     widget_battery_status_init();
@@ -1384,9 +1459,7 @@ int zmk_widget_status_init(
 
 
     /*
-     * ------------------------------------------------------------
      * Modifier initialisieren.
-     * ------------------------------------------------------------
      */
 
     for (int i = 0; i < NUM_SYMBOLS; i++) {
@@ -1400,9 +1473,7 @@ int zmk_widget_status_init(
 
 
     /*
-     * ------------------------------------------------------------
      * Animation initialisieren.
-     * ------------------------------------------------------------
      */
 
     current_anim_state =
@@ -1419,9 +1490,7 @@ int zmk_widget_status_init(
 
 
     /*
-     * ------------------------------------------------------------
-     * Work Items
-     * ------------------------------------------------------------
+     * Work initialisieren.
      */
 
     k_work_init_delayable(
@@ -1436,18 +1505,14 @@ int zmk_widget_status_init(
 
 
     /*
-     * ------------------------------------------------------------
-     * Initial render.
-     * ------------------------------------------------------------
+     * Initial zeichnen.
      */
 
     draw_status(widget);
 
 
     /*
-     * ------------------------------------------------------------
      * Animation starten.
-     * ------------------------------------------------------------
      */
 
     k_work_schedule(
@@ -1461,7 +1526,7 @@ int zmk_widget_status_init(
 
 
 /* ==========================================================================
- * Widget object
+ * Object
  * ========================================================================== */
 
 lv_obj_t *zmk_widget_status_obj(
